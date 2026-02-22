@@ -1,0 +1,8 @@
+{
+	"group": "System Plugins",
+	"order": 2,
+	"pages": [
+		{ "file": "theme.md", "title": "Theme Engine" },
+		{ "file": "ide.md", "title": "IDE Subsystem" }
+	]
+}

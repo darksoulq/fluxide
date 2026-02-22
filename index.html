@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>Fluxide</title>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.3.0/marked.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+	
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/theme/dracula.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldgutter.min.css">
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.css">
+	
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/javascript/javascript.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/markdown/markdown.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/css/css.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/closebrackets.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/edit/matchbrackets.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/selection/active-line.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldcode.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/foldgutter.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/brace-fold.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/xml-fold.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/indent-fold.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/markdown-fold.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/fold/comment-fold.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/dialog/dialog.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/searchcursor.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/search.min.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
+
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+	<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/base16/dracula.min.css">
+	
+	<link rel="stylesheet" href="styles.css">
+</head>
+<body oncontextmenu="return false;">
+	<div id="fx-loading-screen">
+		<div style="font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">FLUXIDE KERNEL</div>
+		<div id="fx-loading-bar-container"><div id="fx-loading-bar"></div></div>
+		<div id="fx-loading-text" style="font-size: 11px; color: var(--text-dim); font-family: var(--font-code);">Initializing...</div>
+	</div>
+
+	<div id="fx-mount-screen">
+		<div class="fx-mount-card">
+			<div class="fx-mount-icon">
+				<svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+			</div>
+			<h2 style="margin-top:0; font-weight:800;">Mount Workspace</h2>
+			<p style="color:var(--text-dim); font-size:14px; margin-bottom:24px;">Fluxide requires a native folder on your device to dynamically load and store your workspace locally.</p>
+			<div id="fx-mount-actions" style="display:flex; flex-direction:column; gap:10px;">
+				<button id="fx-btn-new-mount" class="fx-btn fx-btn-primary" style="padding:12px; font-size:14px;">Select Folder</button>
+			</div>
+		</div>
+	</div>
+
+	<div id="fx-shell">
+		<header id="fx-topbar">
+			<div style="display: flex; align-items: center; gap: 30px;">
+				<div style="display: flex; align-items: center; gap: 10px; cursor: pointer;" onclick="location.reload()">
+					<div style="width: 26px; height: 26px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 13px; color: white;">F</div>
+					<span style="font-weight: 800; font-size: 15px; letter-spacing: -0.5px;">FLUXIDE</span>
+				</div>
+				<nav id="fx-nav" style="display: flex; gap: 8px;"></nav>
+			</div>
+			<div id="fx-status" style="display: flex; gap: 10px; align-items: center; justify-content: flex-end;"></div>
+		</header>
+		<main id="fx-viewport"></main>
+	</div>
+
+	<div id="fx-ctx-overlay"></div>
+	<div id="fx-ctx-menu"></div>
+	<div id="fx-modal-overlay"><div id="fx-modal-window"></div></div>
+	<div id="fx-tooltip"></div>
+
+	<script src="js/ui.js"></script>
+	<script src="js/storage.js"></script>
+	<script src="js/kernel.js"></script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+{
+	"group": "Kernel API",
+	"order": 1,
+	"pages": [
+		{ "file": "state_events.md", "title": "State & Events" },
+		{ "file": "fs.md", "title": "File System" },
+		{ "file": "ui.md", "title": "UI Engine" },
+		{ "file": "registry.md", "title": "Registries & Core" }
+	]
+}

@@ -1,0 +1,21 @@
+{
+	"name": "System Reference",
+	"sections": [
+		{
+			"title": "Kernel API",
+			"pages": [
+				{ "file": "kernel/state_events.md", "title": "State & Events" },
+				{ "file": "kernel/fs.md", "title": "File System" },
+				{ "file": "kernel/ui.md", "title": "UI Engine" },
+				{ "file": "kernel/registry.md", "title": "Registries & Core" }
+			]
+		},
+		{
+			"title": "System Core",
+			"pages": [
+				{ "file": "sys/theme.md", "title": "Theme Engine" },
+				{ "file": "sys/ide.md", "title": "IDE Subsystem" }
+			]
+		}
+	]
+}
