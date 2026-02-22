@@ -1,0 +1,8 @@
+{
+	"id": "manager",
+	"name": "Fluxide Manager",
+	"version": "1.0.0",
+	"description": "Manage local extensions and browse the Fluxide Market.",
+	"author": "darksoulq",
+	"entry": "./src/main.js"
+}

@@ -1,20 +1,20 @@
 {
-	"name": "System Reference",
+	"name": "Kernel & System",
 	"sections": [
 		{
 			"title": "Kernel API",
 			"pages": [
 				{ "file": "kernel/state_events.md", "title": "State & Events" },
-				{ "file": "kernel/fs.md", "title": "File System" },
-				{ "file": "kernel/ui.md", "title": "UI Engine" },
-				{ "file": "kernel/registry.md", "title": "Registries & Core" }
+				{ "file": "kernel/fs.md", "title": "File System (VFS)" },
+				{ "file": "kernel/ui.md", "title": "UI & Modals" },
+				{ "file": "kernel/registry.md", "title": "Plugin Registry" }
 			]
 		},
 		{
-			"title": "System Core",
+			"title": "System Plugins",
 			"pages": [
 				{ "file": "sys/theme.md", "title": "Theme Engine" },
-				{ "file": "sys/ide.md", "title": "IDE Subsystem" }
+				{ "file": "sys/ide.md", "title": "IDE & Editor" }
 			]
 		}
 	]

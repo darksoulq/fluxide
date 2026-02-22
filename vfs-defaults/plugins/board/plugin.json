@@ -1,6 +1,9 @@
 {
 	"id": "board",
 	"name": "Kanban Board",
+	"version": "1.0.0",
+	"description": "Create and manage Tasks.",
+	"author": "darksoulq",
 	"entry": "./src/main.js",
 	"deps": []
 }

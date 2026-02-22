@@ -1,7 +1,7 @@
 const fluxide = (() => {
 	const r = { plugins: new Map(), views: new Map(), hooks: {}, components: new Map(), settings: [], keybinds: [] };
 	const m = {};
-	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', ui_scale: '1', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true' }, workspace: null };
+	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', ui_scale: '1.0', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true' }, workspace: null };
 
 	const resolvePath = (baseDir, target) => {
 		if (!target.startsWith('.')) return target;
@@ -110,7 +110,7 @@ const fluxide = (() => {
 			},
 			modal: Object.assign((render) => {
 				const overlay = document.getElementById('fx-modal-overlay'); const win = document.getElementById('fx-modal-window');
-				win.style.padding = ''; win.innerHTML = ''; render(win); overlay.style.display = 'flex'; setTimeout(() => win.classList.add('open'), 10);
+				win.style.cssText = ''; win.innerHTML = ''; render(win); overlay.style.display = 'flex'; setTimeout(() => win.classList.add('open'), 10);
 				overlay.onclick = (e) => { if (e.target === overlay) api.ui.modal.close(); };
 			}, { 
 				close: () => {
@@ -188,6 +188,10 @@ const fluxide = (() => {
 					'plugins/graph/docs/index.json',
 					'plugins/graph/docs/api_graph.md',
 					'plugins/graph/docs/theme.md',
+					'plugins/workspace_zip/plugin.json',
+					'plugins/workspace_zip/src/main.js',
+					'plugins/manager/plugin.json',
+					'plugins/manager/src/main.js'
 				];
 
 				try {
@@ -208,10 +212,7 @@ const fluxide = (() => {
 				text.innerText = 'Provisioning State...';
 				const initWorkspace = {
 					columns: [
-						{ id: 'c1', title: 'BACKLOG', tasks: [
-							{id: 't1', title: 'Drag & Drop Custom Engine', priority: 'high', tags: ['sys', 'core'], deps: [], desc: 'Complete custom mouse-tracker overrides HTML5 limitations.', todos: []},
-							{id: 't2', title: 'Topological Boot', priority: 'medium', tags: ['architecture'], deps: ['t1'], desc: 'Plugins evaluate dependencies securely.', todos: []}
-						]},
+						{ id: 'c1', title: 'BACKLOG', tasks: [] },
 						{ id: 'c2', title: 'IN PROGRESS', tasks: [] },
 						{ id: 'c3', title: 'DONE', tasks: [] }
 					]

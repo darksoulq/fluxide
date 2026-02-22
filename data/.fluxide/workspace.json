@@ -3,17 +3,7 @@
 		{
 			"id": "c1",
 			"title": "BACKLOG",
-			"tasks": [
-				{
-					"id": "t28444",
-					"title": "Test",
-					"priority": "medium",
-					"tags": [],
-					"deps": [],
-					"desc": "```java\npublic static void main(String[]... args) {}\n```",
-					"todos": []
-				}
-			]
+			"tasks": []
 		},
 		{
 			"id": "c2",
@@ -23,19 +13,7 @@
 		{
 			"id": "c3",
 			"title": "DONE",
-			"tasks": [
-				{
-					"id": "t44173",
-					"title": "Test 2",
-					"priority": "medium",
-					"tags": [],
-					"deps": [
-						"t28444"
-					],
-					"desc": "## HELLO",
-					"todos": []
-				}
-			]
+			"tasks": []
 		}
 	]
 }

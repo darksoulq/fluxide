@@ -1,3 +1,4 @@
+// darksoulq/fluxide/darksoulq-fluxide-6f73439658620ffb9d43ea294ca73f49b6c7d35b/vfs-defaults/sys/ide.js
 const { h, prompt, context, modal } = fluxide.ui;
 const { state, fs, keybinds, emit, on, expose, theme } = fluxide;
 
@@ -15,6 +16,7 @@ const IDE = {
 	consoleLogs: null,
 	consoleEl: null,
 	_container: null,
+    commands: [],
 
 	searchMarks: [],
 	searchState: { q: '', r: '', case: false, word: false, cursor: null, matchCount: 0, current: 0, replaceOpen: false },
@@ -27,6 +29,7 @@ const IDE = {
 		this.renderTree = this.renderTree.bind(this);
 		this.openDocsModal = this.openDocsModal.bind(this);
 		this.openQuickSearch = this.openQuickSearch.bind(this);
+		this.openCommandPalette = this.openCommandPalette.bind(this);
 		this.logToConsole = this.logToConsole.bind(this);
 		this.toggleSearch = this.toggleSearch.bind(this);
 
@@ -37,6 +40,8 @@ const IDE = {
 			listFiles: () => Object.keys(state.get().vfs),
 			log: this.logToConsole,
 			clearLogs: () => { if(this.consoleLogs) this.consoleLogs.innerHTML = ''; },
+            commands: this.commands,
+            registerCommand: (id, name, action) => this.commands.push({ id, name, action }),
 			headerTools: [],
 			treeContext: [],
 			editorContext: [],
@@ -56,30 +61,86 @@ const IDE = {
 		
 		keybinds.register('ide.closeTab', 'Ctrl-W', () => { if(this.activeTab) this.closeTab(this.activeTab); }, "Close Active Tab");
 		keybinds.register('ide.quickOpen', 'Ctrl-P', () => { this.openQuickSearch(); }, "Quick Open File Search");
+		keybinds.register('ide.commandPalette', 'Ctrl-Shift-P', () => { this.openCommandPalette(); }, "Command Palette");
 		keybinds.register('ide.toggleConsole', 'Ctrl-`', () => { this.toggleConsole(); }, "Toggle Output Console");
 		keybinds.register('ide.search', 'Ctrl-F', () => { this.toggleSearch(false); }, "Search within file");
 		keybinds.register('ide.replace', 'Ctrl-H', () => { this.toggleSearch(true); }, "Replace within file");
 		
-		fluxide.settings.register('ide', {
-			label: 'Editor',
+		fluxide.settings.register('editor.general', {
+			label: 'General',
 			defaults: { word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true', font_size: '14' }
 		});
 		
-		on('settings:render:ide', ({container}) => {
+		on('settings:render:editor.general', ({container}) => {
 			container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Editor Settings'));
 			container.appendChild(fluxide.settings.createControl('Font Size', 'number', 'font_size'));
 			container.appendChild(fluxide.settings.createControl('Tab Size', 'number', 'tab_size'));
-			container.appendChild(fluxide.settings.createControl('Word Wrap', 'select', 'word_wrap', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Code Folding', 'select', 'code_folding', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Active Line Highlight', 'select', 'active_line', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Line Numbers', 'select', 'line_numbers', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Use Tabs', 'select', 'use_tabs', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Match Brackets', 'select', 'match_brackets', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
-			container.appendChild(fluxide.settings.createControl('Auto Close Brackets', 'select', 'auto_close_brackets', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Word Wrap', 'toggle', 'word_wrap'));
+			container.appendChild(fluxide.settings.createControl('Code Folding', 'toggle', 'code_folding'));
+			container.appendChild(fluxide.settings.createControl('Active Line Highlight', 'toggle', 'active_line'));
+			container.appendChild(fluxide.settings.createControl('Line Numbers', 'toggle', 'line_numbers'));
+			container.appendChild(fluxide.settings.createControl('Use Tabs', 'toggle', 'use_tabs'));
+			container.appendChild(fluxide.settings.createControl('Match Brackets', 'toggle', 'match_brackets'));
+			container.appendChild(fluxide.settings.createControl('Auto Close Brackets', 'toggle', 'auto_close_brackets'));
 		});
 
 		on('workspace:change', () => { if(state.get().activeView === 'ide') this.renderTree(); });
 		on('settings:change', () => { this.updateEditorSettings(); });
+	},
+
+	openCommandPalette() {
+		modal(win => {
+            const allCommands = fluxide.keybinds.getAll().map(k => ({ label: k.description || k.id, sub: k.id, key: k.key, action: k.action }));
+            if (this.commands) {
+                this.commands.forEach(c => allCommands.push({ label: c.name, sub: c.id, action: c.action }));
+            }
+
+			const inputContainer = h('div', { style: { display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0 12px' } }, [
+				h('div', { innerHTML: theme.getIcon('terminal'), style: { width: '16px', height: '16px', color: 'var(--text-dim)' } }),
+				h('input', { class: 'fx-input', style: { border: 'none', background: 'transparent', boxShadow: 'none' }, placeholder: 'Search commands...' })
+			]);
+			const input = inputContainer.querySelector('input');
+			const list = h('div', { style: { marginTop: '10px', maxHeight: '350px', overflowY: 'auto' } });
+			
+            let selectedIndex = 0;
+            let currentFiltered = [];
+
+			const renderList = (filter) => {
+				list.innerHTML = '';
+				const f = filter.toLowerCase();
+				currentFiltered = allCommands.filter(c => c.label.toLowerCase().includes(f) || (c.sub && c.sub.toLowerCase().includes(f)));
+                if(selectedIndex >= currentFiltered.length) selectedIndex = Math.max(0, currentFiltered.length - 1);
+
+                currentFiltered.forEach((c, idx) => {
+                    const isActive = idx === selectedIndex;
+                    const item = h('div', {
+                        class: 'ctx-item' + (isActive ? ' active' : ''),
+                        style: { padding: '10px 14px', borderBottom: '1px solid var(--border)', gap: '12px', background: isActive ? 'var(--accent-glow)' : 'transparent', color: isActive ? 'var(--text)' : 'var(--text-dim)' },
+                        onMouseOver: () => { selectedIndex = idx; renderList(input.value); },
+                        onClick: () => { modal.close(); c.action(); }
+                    }, [
+                        h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column' } }, [
+                            h('span', { style: { fontSize: '13px', fontWeight: isActive ? 600 : 500 } }, c.label),
+                            h('span', { style: { fontSize: '10px', color: isActive ? 'rgba(255,255,255,0.7)' : 'var(--text-dark)', marginTop: '2px', fontFamily: 'var(--font-code)' } }, c.sub)
+                        ]),
+                        c.key ? h('div', { class: 'ctx-keybind', style: { color: isActive ? 'rgba(255,255,255,0.9)' : '' } }, c.key) : h('div', {})
+                    ]);
+                    list.appendChild(item);
+                });
+			};
+			input.oninput = (e) => { selectedIndex = 0; renderList(e.target.value); };
+            input.onkeydown = (e) => {
+                if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, currentFiltered.length - 1); renderList(input.value); }
+                else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); renderList(input.value); }
+                else if (e.key === 'Enter') { e.preventDefault(); if(currentFiltered[selectedIndex]) { modal.close(); currentFiltered[selectedIndex].action(); } }
+            };
+
+			win.appendChild(h('div', { class: 'fx-modal-body' }, [ h('h3', { style: { marginTop: 0, marginBottom: '20px', fontSize: '14px', color: 'var(--text-dim)' } }, 'Command Palette'), inputContainer, list ]));
+			renderList('');
+			setTimeout(() => input.focus(), 50);
+		});
+		const overlay = document.getElementById('fx-modal-overlay');
+		overlay.onclick = (e) => { if (e.target === overlay) modal.close(); };
 	},
 
 	openFile(path) {

@@ -1,3 +1,4 @@
+// darksoulq/fluxide/darksoulq-fluxide-6f73439658620ffb9d43ea294ca73f49b6c7d35b/vfs-defaults/sys/themes.js
 const { state, expose, emit } = fluxide;
 
 fluxide.register({
@@ -61,12 +62,12 @@ fluxide.register({
 			}
 		});
 
-        fluxide.settings.register('themes', {
+        fluxide.settings.register('appearance.themes', {
             label: 'Themes & Icons',
             defaults: { theme: 'dracula', icon_pack: 'default' }
         });
 
-        fluxide.on('settings:render:themes', ({container}) => {
+        fluxide.on('settings:render:appearance.themes', ({container}) => {
             const h = fluxide.ui.h;
             container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Themes & Icons'));
             container.appendChild(fluxide.settings.createControl('System Theme', 'select', 'theme', { options: Object.keys(themes).map(k => ({ value: k, label: k.toUpperCase() })) }));

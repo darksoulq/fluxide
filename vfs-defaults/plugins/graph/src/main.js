@@ -1,5 +1,3 @@
-// darksoulq/fluxide/darksoulq-fluxide-6f73439658620ffb9d43ea294ca73f49b6c7d35b/vfs-defaults/plugins/graph/src/main.js
-const { h, context } = fluxide.ui;
 const { state, emit, on, expose } = fluxide;
 
 fluxide.register({
@@ -13,6 +11,20 @@ fluxide.register({
             }
         });
         on('workspace:change', () => fluxide.graph.refresh());
+
+        fluxide.settings.register('plugins.graph', {
+            label: 'Graph Settings',
+            defaults: { graph_bg: 'dots' }
+        });
+
+        on('settings:render:plugins.graph', ({container}) => {
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Graph Settings'));
+            container.appendChild(fluxide.settings.createControl('Background Style', 'select', 'graph_bg', { options: [{value:'dots',label:'Dot Grid'},{value:'grid',label:'Lines Grid'},{value:'none',label:'None'}] }));
+        });
+
+        on('settings:change', ({key}) => {
+            if(key === 'graph_bg' && state.get().activeView === 'graph') fluxide.graph.refresh();
+        });
     },
     render(container) {
         this._container = container;
@@ -33,8 +45,8 @@ fluxide.register({
         const svg = h('svg', { style: { position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 1 } });
         
         const defs = h('defs', {}, [
-            h('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: '10', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto-start-reverse' }, [
-                h('path', { d: 'M 0 0 L 10 5 L 0 10 z', fill: 'var(--accent)' })
+            h('marker', { id: 'arrow', viewBox: '0 0 10 10', refX: '8', refY: '5', markerWidth: '6', markerHeight: '6', orient: 'auto' }, [
+                h('path', { d: 'M 0 1 L 8 5 L 0 9 L 2 5 z', fill: 'var(--accent)' })
             ])
         ]);
         svg.appendChild(defs);
@@ -47,9 +59,27 @@ fluxide.register({
         let panY = state.get().graphPanY || 0;
         let zoom = state.get().graphZoom || 1;
 
+        const updateBg = () => {
+            const bg = state.get().settings.graph_bg || 'dots';
+            if (bg === 'dots') {
+                wrapper.style.backgroundImage = `radial-gradient(var(--border) 1px, transparent 1px)`;
+                wrapper.style.backgroundSize = `${25 * zoom}px ${25 * zoom}px`;
+                wrapper.style.backgroundPosition = `${panX}px ${panY}px`;
+            } else if (bg === 'grid') {
+                wrapper.style.backgroundImage = `linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px)`;
+                wrapper.style.backgroundSize = `${25 * zoom}px ${25 * zoom}px`;
+                wrapper.style.backgroundPosition = `${panX}px ${panY}px`;
+            } else {
+                wrapper.style.backgroundImage = 'none';
+            }
+        };
+
         const updateTransform = () => {
             canvas.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+            canvas.style.transformOrigin = '0 0';
             svg.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+            svg.style.transformOrigin = '0 0';
+            updateBg();
         };
         updateTransform();
 
@@ -70,9 +100,11 @@ fluxide.register({
         });
 
         window.addEventListener('mouseup', () => {
-            isDraggingCanvas = false;
-            wrapper.style.cursor = 'default';
-            state.update(s => { s.graphPanX = panX; s.graphPanY = panY; s.graphZoom = zoom; });
+            if (isDraggingCanvas) {
+                isDraggingCanvas = false;
+                wrapper.style.cursor = 'default';
+                state.update(s => { s.graphPanX = panX; s.graphPanY = panY; s.graphZoom = zoom; });
+            }
         });
 
         wrapper.onwheel = (e) => {
@@ -92,30 +124,31 @@ fluxide.register({
             tasks.forEach(task => {
                 const srcEl = canvas.querySelector(`[data-id="${task.id}"]`);
                 if(!srcEl) return;
-                const sr = srcEl.getBoundingClientRect();
-                const cw = canvas.getBoundingClientRect();
                 
-                const sx = (sr.left - cw.left) / zoom + sr.width / 2;
-                const sy = (sr.top - cw.top) / zoom + sr.height / 2;
+                // T2 (Dependent Task) - Arrow points TO this element
+                const sx = parseFloat(srcEl.style.left);
+                const sy = parseFloat(srcEl.style.top) + srcEl.offsetHeight / 2;
 
                 (task.deps || []).forEach(depId => {
                     const tgtEl = canvas.querySelector(`[data-id="${depId}"]`);
                     if(!tgtEl) return;
-                    const tr = tgtEl.getBoundingClientRect();
-                    const tx = (tr.left - cw.left) / zoom + tr.width / 2;
-                    const ty = (tr.top - cw.top) / zoom + tr.height / 2;
-
-                    const dx = tx - sx;
-                    const dy = ty - sy;
                     
-                    const p1x = sx + dx * 0.2;
-                    const p1y = sy;
-                    const p2x = sx + dx * 0.8;
-                    const p2y = ty;
+                    // T1 (Dependency) - Arrow originates FROM this element
+                    const tx = parseFloat(tgtEl.style.left) + tgtEl.offsetWidth;
+                    const ty = parseFloat(tgtEl.style.top) + tgtEl.offsetHeight / 2;
 
+                    const dx = sx - tx;
+                    const cOff = Math.max(Math.abs(dx) * 0.5, 40);
+                    
+                    const p1x = tx + cOff;
+                    const p1y = ty;
+                    const p2x = sx - cOff;
+                    const p2y = sy;
+
+                    // Draw from T1 to T2 with arrow at T2
                     const path = h('path', {
                         class: 'link',
-                        d: `M ${sx} ${sy} C ${p1x} ${p1y}, ${p2x} ${p2y}, ${tx} ${ty}`,
+                        d: `M ${tx} ${ty} C ${p1x} ${p1y}, ${p2x} ${p2y}, ${sx} ${sy}`,
                         fill: 'none',
                         stroke: 'var(--accent)',
                         'stroke-width': '2',
