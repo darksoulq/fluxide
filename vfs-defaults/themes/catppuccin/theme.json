@@ -1,0 +1,29 @@
+{
+    "id": "catppuccin",
+    "name": "Catppuccin Mocha",
+    "version": "1.0.0",
+    "author": "Fluxide",
+    "description": "Soothing pastel theme for Fluxide.",
+    "vars": {
+        "--bg": "#1e1e2e",
+        "--surface": "#181825",
+        "--surface-low": "#11111b",
+        "--surface-high": "#313244",
+        "--surface-hover": "#45475a",
+        "--border": "#313244",
+        "--border-bright": "#585b70",
+        "--text": "#cdd6f4",
+        "--text-dim": "#a6adc8",
+        "--text-dark": "#7f849c",
+        "--accent": "#cba6f7",
+        "--accent-glow": "rgba(203, 166, 247, 0.15)",
+        "--danger": "#f38ba8",
+        "--danger-border": "rgba(243, 139, 168, 0.3)",
+        "--editor-bg": "#1e1e2e",
+        "--radius-sm": "4px",
+        "--radius-md": "8px",
+        "--shadow": "0 4px 6px rgba(0,0,0,0.3)",
+        "--font": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        "--font-code": "'Fira Code', 'Courier New', monospace"
+    }
+}

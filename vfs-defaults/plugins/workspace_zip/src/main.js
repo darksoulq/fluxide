@@ -1,19 +1,19 @@
 const { h } = fluxide.ui;
-const { state, on, expose, fs } = fluxide;
+const { state, on, fs } = fluxide;
 
 fluxide.register({
     id: 'workspace_zip',
     init() {
-        fluxide.settings.register('utilities.workspace_zip', {
+        fluxide.settings.register('extra.workspace', {
             label: 'Workspace Backup'
         });
 
-        on('settings:render:utilities.workspace_zip', ({container}) => {
-            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Workspace Import / Export'));
+        on('settings:render:extra.workspace', ({container}) => {
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px', color: 'var(--text)' } }, 'Workspace Import / Export'));
             
             const exportBtn = h('button', {
                 class: 'fx-btn fx-btn-primary',
-                style: { padding: '10px 16px', fontSize: '13px', flex: 1, justifyContent: 'center' },
+                style: { padding: '10px 16px', fontSize: '14px', flex: 1, justifyContent: 'center' },
                 onClick: async () => {
                     if (!window.JSZip) return fluxide.ide?.log('JSZip not found', 'error');
                     const zip = new JSZip();
@@ -67,7 +67,7 @@ fluxide.register({
                         const pText = h('div', { style: { fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-code)' } }, 'Extracting...');
 
                         fluxide.ui.modal(win => {
-                            win.appendChild(h('div', { class: 'fx-modal-body', style: { textAlign: 'center', padding: '40px' } }, [
+                            win.appendChild(h('div', { class: 'fx-modal-body', style: { textAlign: 'center', padding: '40px', color: 'var(--text)' } }, [
                                 h('h3', { style: { marginTop: 0, marginBottom: '10px' } }, 'Importing Workspace...'),
                                 pBarContainer,
                                 pText
@@ -98,14 +98,14 @@ fluxide.register({
 
             const importBtn = h('button', {
                 class: 'fx-btn',
-                style: { padding: '10px 16px', fontSize: '13px', flex: 1, justifyContent: 'center' },
+                style: { padding: '10px 16px', fontSize: '14px', flex: 1, justifyContent: 'center' },
                 onClick: () => importInput.click()
             }, 'Import Workspace (ZIP)');
 
-            const wrapper = h('div', { style: { display: 'flex', gap: '15px', maxWidth: '500px' } }, [ exportBtn, importBtn, importInput ]);
+            const wrapper = h('div', { style: { display: 'flex', gap: '16px', maxWidth: '500px' } }, [ exportBtn, importBtn, importInput ]);
             
             container.appendChild(wrapper);
-            container.appendChild(h('p', { style: { fontSize: '12px', color: 'var(--text-dim)', marginTop: '20px', lineHeight: '1.5' } }, 'Importing a workspace will overwrite matching files. The UI will reload upon completion.'));
+            container.appendChild(h('p', { style: { fontSize: '14px', color: 'var(--text-dim)', marginTop: '24px', lineHeight: '1.6' } }, 'Importing a workspace will forcefully overwrite matching files. Ensure you have backed up your current workspace before proceeding.'));
         });
     }
 });

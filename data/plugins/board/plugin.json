@@ -1,6 +1,0 @@
-{
-	"id": "board",
-	"name": "Kanban Board",
-	"entry": "./src/main.js",
-	"deps": []
-}

@@ -1,11 +1,10 @@
-// darksoulq/fluxide/darksoulq-fluxide-6f73439658620ffb9d43ea294ca73f49b6c7d35b/vfs-defaults/sys/ide.js
 const { h, prompt, context, modal } = fluxide.ui;
-const { state, fs, keybinds, emit, on, expose, theme } = fluxide;
+const { state, emit, on, expose, theme } = fluxide;
 
 const IDE = {
 	openTabs: [],
 	activeTab: null,
-	expandedDirs: new Set(['plugins', 'themes']),
+	expandedDirs: new Set(['plugins', 'themes', 'icon-packs']),
 	dirtyFiles: new Set(),
 	consoleVisible: false,
 	cm: null,
@@ -32,6 +31,7 @@ const IDE = {
 		this.openCommandPalette = this.openCommandPalette.bind(this);
 		this.logToConsole = this.logToConsole.bind(this);
 		this.toggleSearch = this.toggleSearch.bind(this);
+		this.openProjectCreationModal = this.openProjectCreationModal.bind(this);
 
 		expose('ide', { 
 			openFile: this.openFile, 
@@ -50,21 +50,21 @@ const IDE = {
 			addEditorContext: (i) => fluxide.ide.editorContext.push(i)
 		});
 
-		keybinds.register('ide.save', 'Ctrl-S', async () => { 
+		fluxide.keybinds.register('ide.save', 'Ctrl-S', async () => { 
 			if(this.activeTab && this.cm) { 
-				await fs.write(this.activeTab, this.cm.getValue());
+				await fluxide.fs.write(this.activeTab, this.cm.getValue());
 				this.dirtyFiles.delete(this.activeTab);
 				this.renderTabs();
 				this.logToConsole(`Saved: ${this.activeTab}`, 'success');
 			} 
 		}, "Save Current File");
 		
-		keybinds.register('ide.closeTab', 'Ctrl-W', () => { if(this.activeTab) this.closeTab(this.activeTab); }, "Close Active Tab");
-		keybinds.register('ide.quickOpen', 'Ctrl-P', () => { this.openQuickSearch(); }, "Quick Open File Search");
-		keybinds.register('ide.commandPalette', 'Ctrl-Shift-P', () => { this.openCommandPalette(); }, "Command Palette");
-		keybinds.register('ide.toggleConsole', 'Ctrl-`', () => { this.toggleConsole(); }, "Toggle Output Console");
-		keybinds.register('ide.search', 'Ctrl-F', () => { this.toggleSearch(false); }, "Search within file");
-		keybinds.register('ide.replace', 'Ctrl-H', () => { this.toggleSearch(true); }, "Replace within file");
+		fluxide.keybinds.register('ide.closeTab', 'Ctrl-W', () => { if(this.activeTab) this.closeTab(this.activeTab); }, "Close Active Tab");
+		fluxide.keybinds.register('ide.quickOpen', 'Ctrl-P', () => { this.openQuickSearch(); }, "Quick Open File Search");
+		fluxide.keybinds.register('ide.commandPalette', 'Ctrl-Shift-P', () => { this.openCommandPalette(); }, "Command Palette");
+		fluxide.keybinds.register('ide.toggleConsole', 'Ctrl-`', () => { this.toggleConsole(); }, "Toggle Output Console");
+		fluxide.keybinds.register('ide.search', 'Ctrl-F', () => { this.toggleSearch(false); }, "Search within file");
+		fluxide.keybinds.register('ide.replace', 'Ctrl-H', () => { this.toggleSearch(true); }, "Replace within file");
 		
 		fluxide.settings.register('editor.general', {
 			label: 'General',
@@ -80,7 +80,7 @@ const IDE = {
 			container.appendChild(fluxide.settings.createControl('Active Line Highlight', 'toggle', 'active_line'));
 			container.appendChild(fluxide.settings.createControl('Line Numbers', 'toggle', 'line_numbers'));
 			container.appendChild(fluxide.settings.createControl('Use Tabs', 'toggle', 'use_tabs'));
-			container.appendChild(fluxide.settings.createControl('Match Brackets', 'toggle', 'match_brackets'));
+			container.appendChild(fluxide.settings.createControl('Match Brackets', 'toggle', 'auto_close_brackets'));
 			container.appendChild(fluxide.settings.createControl('Auto Close Brackets', 'toggle', 'auto_close_brackets'));
 		});
 
@@ -198,7 +198,11 @@ const IDE = {
 		if(!this.consoleLogs) return;
 		const d = new Date();
 		const timeStr = `[${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}]`;
-		this.consoleLogs.appendChild(h('div', { class: 'log-line log-' + type }, [ h('span', { class: 'log-time' }, timeStr), h('span', { class: 'log-msg' }, msg) ]));
+        const msgSpan = h('span', { class: 'log-msg' });
+        if (typeof msg === 'string') msgSpan.innerText = msg;
+        else if (msg instanceof HTMLElement) msgSpan.appendChild(msg);
+
+		this.consoleLogs.appendChild(h('div', { class: 'log-line log-' + type }, [ h('span', { class: 'log-time' }, timeStr), msgSpan ]));
 		this.consoleLogs.scrollTop = this.consoleLogs.scrollHeight;
 	},
 
@@ -363,7 +367,7 @@ const IDE = {
 		this.cm.setOption('indentWithTabs', s.use_tabs !== 'false');
 		this.cm.setOption('matchBrackets', s.match_brackets !== 'false');
 		this.cm.setOption('autoCloseBrackets', s.auto_close_brackets !== 'false');
-		this.editorContainer.style.fontSize = (s.font_size || '14') + 'px';
+		this.editorContainer.style.setProperty('--editor-font-size', (s.font_size || '14') + 'px');
 		
 		let gutters = [];
 		if(s.line_numbers !== 'false') gutters.push("CodeMirror-linenumbers");
@@ -380,15 +384,105 @@ const IDE = {
 		this.statusBar.innerHTML = `Ln ${pos.line + 1}, Col ${pos.ch + 1} &nbsp;&nbsp;|&nbsp;&nbsp; ${lines} Lines &nbsp;&nbsp;|&nbsp;&nbsp; ${typeof mode === 'string' ? mode : mode.name}`;
 	},
 
+	openProjectCreationModal(type) {
+		modal(win => {
+			const isPlugin = type === 'plugin';
+			const isTheme = type === 'theme';
+			
+			const fId = h('input', { class: 'fx-input', placeholder: 'e.g. my_project' });
+			const fName = h('input', { class: 'fx-input', placeholder: 'e.g. My Project' });
+			const fVersion = h('input', { class: 'fx-input', value: '1.0.0' });
+			const fAuthor = h('input', { class: 'fx-input', placeholder: 'Author' });
+			const fDesc = h('textarea', { class: 'fx-input', style: { minHeight: '60px', resize: 'vertical', fontFamily: 'var(--font)' }, placeholder: 'Description...' });
+			const fEntry = isPlugin ? h('input', { class: 'fx-input', value: './src/main.js' }) : null;
+
+			const formRow = (label, input) => h('div', { style: { marginBottom: '15px' } }, [
+				h('label', { style: { display: 'block', fontSize: '12px', color: 'var(--text-dim)', marginBottom: '5px', fontWeight: 600 } }, label),
+				input
+			]);
+
+			win.appendChild(h('div', { class: 'fx-modal-body', style: { width: '400px' } }, [
+				h('h3', { style: { marginTop: 0, marginBottom: '20px', color: 'var(--text)' } }, `Create ${type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}`),
+				formRow('ID (Folder Name)', fId),
+				formRow('Display Name', fName),
+				formRow('Version', fVersion),
+				formRow('Author', fAuthor),
+				formRow('Description', fDesc),
+				isPlugin ? formRow('Entry File', fEntry) : null,
+				h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' } }, [
+					h('button', { class: 'fx-btn', onClick: () => modal.close() }, 'Cancel'),
+					h('button', { class: 'fx-btn fx-btn-primary', onClick: async () => {
+						const id = fId.value.trim();
+						if(!id) return;
+						const basePath = (isPlugin ? 'plugins' : (isTheme ? 'themes' : 'icon-packs')) + '/' + id;
+						const metaName = isPlugin ? 'plugin.json' : (isTheme ? 'theme.json' : 'main.json');
+						
+						const meta = {
+							id,
+							name: fName.value.trim() || id,
+							version: fVersion.value.trim() || '1.0.0',
+							author: fAuthor.value.trim() || 'Anonymous',
+							description: fDesc.value.trim() || ''
+						};
+
+						if (isPlugin) {
+							meta.entry = fEntry.value.trim() || './src/main.js';
+						} else if (isTheme) {
+							meta.vars = {
+								"--bg": "#0f1014", "--surface": "#15161b", "--surface-low": "#0a0a0c",
+								"--surface-high": "#1c1e26", "--surface-hover": "#232530", "--border": "#2a2d3e",
+								"--border-bright": "#3b3f54", "--text": "#f8f8f2", "--text-dim": "#a6accd",
+								"--text-dark": "#5c6370", "--accent": "#82aaff", "--accent-glow": "rgba(130, 170, 255, 0.15)",
+								"--danger": "#ff5370", "--danger-border": "rgba(255, 83, 112, 0.3)",
+								"--editor-bg": "#0f1014", "--radius-sm": "4px", "--radius-md": "8px",
+								"--shadow": "0 4px 6px rgba(0,0,0,0.3)", "--font": "-apple-system, BlinkMacSystemFont, sans-serif",
+								"--font-code": "monospace"
+							};
+						} else {
+							meta.icons = { "terminal": "./icons/terminal.svg", "search": "./icons/search.svg", "replace": "./icons/replace.svg", "matchCase": "./icons/matchCase.svg", "matchWord": "./icons/matchWord.svg", "arrowUp": "./icons/arrowUp.svg", "arrowDown": "./icons/arrowDown.svg", "close": "./icons/close.svg", "chevronRight": "./icons/chevronRight.svg", "chevronDown": "./icons/chevronDown.svg", "refresh": "./icons/refresh.svg", "collapseAll": "./icons/collapseAll.svg", "docs": "./icons/docs.svg", "save": "./icons/save.svg", "pencil": "./icons/pencil.svg", "trash": "./icons/trash.svg", "newFile": "./icons/newFile.svg", "newFolder": "./icons/newFolder.svg", "plugin": "./icons/plugin.svg" };
+							meta.fileIcons = { "default": "./icons/file.svg", "js": "./icons/file-js.svg", "json": "./icons/file-json.svg", "md": "./icons/file-md.svg", "css": "./icons/file-css.svg", "html": "./icons/file-html.svg" };
+							meta.folderIcons = { "default": "./icons/folder.svg", "open": "./icons/folder-open.svg" };
+						}
+
+						state.update(s => s.vfs[`${basePath}/${metaName}`] = JSON.stringify(meta, null, 4));
+						await fluxide.fs.write(`${basePath}/${metaName}`, JSON.stringify(meta, null, 4));
+
+						if (isPlugin && meta.entry) {
+							const entryContent = `const { h } = fluxide.ui;\nconst { state, on, expose } = fluxide;\n\nfluxide.register({\n    id: '${id}',\n    init() {\n        console.log('${meta.name} initialized!');\n    }\n});\n`;
+							const cleanEntry = meta.entry.startsWith('./') ? meta.entry.substring(2) : meta.entry;
+							state.update(s => s.vfs[`${basePath}/${cleanEntry}`] = entryContent);
+							await fluxide.fs.write(`${basePath}/${cleanEntry}`, entryContent);
+							this.openFile(`${basePath}/${cleanEntry}`);
+						} else if (!isPlugin && !isTheme) {
+							state.update(s => s.vfs[`${basePath}/icons/.keep`] = '');
+							await fluxide.fs.write(`${basePath}/icons/.keep`, '');
+							this.openFile(`${basePath}/${metaName}`);
+						} else {
+							this.openFile(`${basePath}/${metaName}`);
+						}
+
+						this.expandedDirs.add(isPlugin ? 'plugins' : (isTheme ? 'themes' : 'icon-packs'));
+						this.expandedDirs.add(basePath);
+						
+						this.renderTree();
+						this.logToConsole(`Created ${type}: ${id}`, 'success');
+						modal.close();
+					}}, 'Create')
+				])
+			]));
+			setTimeout(() => fId.focus(), 50);
+		});
+	},
+
 	render(container) {
 		this._container = container;
 		container.style.display = 'grid'; container.style.gridTemplateColumns = '280px 1fr'; container.style.height = '100%';
 		container.innerHTML = '';
 
-		this.treeEl = h('div', { id: 'ide-tree', style: { flex: 1, overflowY: 'auto', padding: '10px 10px 20px 10px' } });
+		this.treeEl = h('div', { id: 'ide-tree', style: { flex: 1, overflowY: 'auto', padding: '10px 10px 20px 10px', transition: 'background-color 0.3s' } });
 		this.tabsEl = h('div', { id: 'ide-tabs', class: 'fx-tabs' });
-		this.editorContainer = h('div', { id: 'ide-editor', class: 'editor-container', style: { flex: 1 } });
-		this.statusBar = h('div', { style: { height: '22px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', fontSize: '10px', color: 'var(--text-dark)', fontFamily: 'var(--font-code)', userSelect: 'none' } });
+		this.editorContainer = h('div', { id: 'ide-editor', class: 'editor-container', style: { flex: 1, transition: 'background-color 0.3s' } });
+		this.statusBar = h('div', { style: { height: '22px', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '0 14px', fontSize: '10px', color: 'var(--text-dark)', fontFamily: 'var(--font-code)', userSelect: 'none', transition: 'background-color 0.3s, border-color 0.3s' } });
 
 		this.consoleLogs = h('div', { class: 'fx-console-body' });
 		this.consoleEl = h('div', { class: 'fx-console', style: { height: this.consoleVisible ? '200px' : '0px' } }, [
@@ -401,7 +495,7 @@ const IDE = {
 
 		const baseHeaderTools = [
 			h('button', { class: 'fx-icon-btn', title: 'Refresh File System', innerHTML: theme.getIcon('refresh'), onClick: async () => {
-				const files = await fs.scanWorkspace();
+				const files = await fluxide.fs.scanWorkspace();
 				state.update(s => s.vfs = files);
 				emit('workspace:change');
 				if(this.activeTab && files[this.activeTab] !== undefined) {
@@ -422,12 +516,12 @@ const IDE = {
 
 		const headerTools = h('div', { style: { display: 'flex', gap: '4px', alignItems: 'center' } }, [...extendedHeaderTools, ...baseHeaderTools]);
 
-		const sidebar = h('div', { id: 'ide-sidebar', style: { background: 'var(--surface-low)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none' } }, [
-			h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)' } }, [ h('span', { style: { fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '1px' } }, 'EXPLORER'), headerTools ]),
+		const sidebar = h('div', { id: 'ide-sidebar', style: { background: 'var(--surface-low)', borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', overflow: 'hidden', userSelect: 'none', transition: 'background-color 0.3s, border-color 0.3s' } }, [
+			h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid var(--border)', transition: 'border-color 0.3s' } }, [ h('span', { style: { fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '1px' } }, 'EXPLORER'), headerTools ]),
 			this.treeEl
 		]);
 
-		const editorArea = h('div', { style: { display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--editor-bg)' } }, [
+		const editorArea = h('div', { style: { display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--editor-bg)', transition: 'background-color 0.3s' } }, [
 			this.tabsEl, this.editorContainer, this.statusBar, this.consoleEl
 		]);
 
@@ -458,7 +552,7 @@ const IDE = {
 
 		this.editorContainer.oncontextmenu = (e) => {
 			const baseCtx = [
-				{ label: 'Save File', key: 'Ctrl-S', icon: theme.getIcon('save'), action: async () => { if(this.activeTab) { await fs.write(this.activeTab, this.cm.getValue()); this.dirtyFiles.delete(this.activeTab); this.renderTabs(); this.logToConsole(`Saved: ${this.activeTab}`, 'success'); } } },
+				{ label: 'Save File', key: 'Ctrl-S', icon: theme.getIcon('save'), action: async () => { if(this.activeTab) { await fluxide.fs.write(this.activeTab, this.cm.getValue()); this.dirtyFiles.delete(this.activeTab); this.renderTabs(); this.logToConsole(`Saved: ${this.activeTab}`, 'success'); } } },
 				{ sep: true }, 
 				{ label: 'Quick Open', key: 'Ctrl-P', icon: theme.getIcon('search'), action: () => this.openQuickSearch() },
 				{ sep: true },
@@ -470,7 +564,31 @@ const IDE = {
 		};
 
 		this.renderFull();
-		setTimeout(() => this.cm.refresh(), 100);
+		
+		setTimeout(() => { 
+            if(this.cm) this.cm.refresh(); 
+            const errs = state.get().startupErrors;
+            if (errs && errs.length > 0) {
+                errs.forEach(err => {
+                    const link = h('span', { style: { color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline', marginLeft: '10px' }, onClick: () => {
+                        this.openFile(err.path);
+                        setTimeout(() => {
+                            if(this.cm) {
+                                this.cm.setCursor({line: err.line - 1, ch: err.ch});
+                                this.cm.focus();
+                                this.cm.scrollIntoView({line: err.line - 1, ch: err.ch}, 100);
+                            }
+                        }, 100);
+                    }}, `Jump to ${err.path}:${err.line}`);
+                    
+                    const wrap = h('span', {}, [ h('span', {}, err.error), link ]);
+                    this.logToConsole(wrap, 'error');
+                });
+                state.get().startupErrors = [];
+                if (!this.consoleVisible) this.toggleConsole();
+            }
+        }, 100);
+
 		if(this.consoleLogs && this.consoleLogs.children.length === 0) this.logToConsole('Fluxide IDE mounted successfully.', 'success');
 	},
 
@@ -528,7 +646,7 @@ const IDE = {
 			const newPath = parentPath ? (parentPath + '/' + name) : name;
 			const fullPath = type === 'folder' ? newPath + '/.keep' : newPath;
 			state.update(s => s.vfs[fullPath] = type === 'folder' ? '' : ''); 
-			await fs.write(fullPath, type === 'folder' ? '' : '');
+			await fluxide.fs.write(fullPath, type === 'folder' ? '' : '');
 			if(parentPath) this.expandedDirs.add(parentPath); 
 			this.logToConsole(`Created ${type}: ${fullPath}`, 'success');
 			if(type === 'file') this.openFile(fullPath);
@@ -559,10 +677,11 @@ const IDE = {
 		this.treeEl.innerHTML = '';
 		
 		this.treeEl.oncontextmenu = (e) => {
-			if(e.target === this.treeEl) {
+			if(e.target === this.treeEl || e.target.closest('#ide-sidebar') === e.target) {
 				context(e, [
-					{ label: 'Create Plugin', icon: theme.getIcon('plugin'), action: () => this.promptNew('folder', 'plugins') },
-					{ label: 'Create Theme', icon: theme.getIcon('newFile'), action: () => this.promptNew('file', 'themes') }
+					{ label: 'Create Plugin', icon: theme.getIcon('plugin'), action: () => this.openProjectCreationModal('plugin') },
+					{ label: 'Create Theme', icon: theme.getIcon('newFolder'), action: () => this.openProjectCreationModal('theme') },
+					{ label: 'Create Icon Pack', icon: theme.getIcon('newFolder'), action: () => this.openProjectCreationModal('icon_pack') }
 				]);
 			}
 		};
@@ -602,21 +721,25 @@ const IDE = {
 						const menu = [];
 						if(isFile) {
 							menu.push({ label: 'Rename File', icon: theme.getIcon('pencil'), action: async () => {
-								const newName = await prompt("Rename", itemPath);
-								if(newName && newName !== itemPath) {
+								const currentName = itemPath.split('/').pop();
+								const newBaseName = await prompt("Rename File", currentName);
+								if(newBaseName && newBaseName !== currentName) {
+									const parentPath = itemPath.includes('/') ? itemPath.substring(0, itemPath.lastIndexOf('/')) : '';
+									const newPath = parentPath ? (parentPath + '/' + newBaseName) : newBaseName;
+									
 									const content = state.get().vfs[itemPath];
-									state.update(s => { delete s.vfs[itemPath]; s.vfs[newName] = content; });
-									await fs.write(newName, content); await fs.remove(itemPath);
-									this.logToConsole(`Renamed: ${itemPath} -> ${newName}`, 'info');
+									state.update(s => { delete s.vfs[itemPath]; s.vfs[newPath] = content; });
+									await fluxide.fs.write(newPath, content); await fluxide.fs.remove(itemPath);
+									this.logToConsole(`Renamed: ${itemPath} -> ${newPath}`, 'info');
 									if(this.openTabs.includes(itemPath)) {
-										this.openTabs[this.openTabs.indexOf(itemPath)] = newName;
-										if(this.activeTab === itemPath) this.activeTab = newName;
+										this.openTabs[this.openTabs.indexOf(itemPath)] = newPath;
+										if(this.activeTab === itemPath) this.activeTab = newPath;
 									}
 									this.renderFull();
 								}
 							}});
 							menu.push({ sep: true }, { label: 'Delete File', icon: theme.getIcon('trash'), danger: true, action: async () => {
-								state.update(s => delete s.vfs[itemPath]); await fs.remove(itemPath);
+								state.update(s => delete s.vfs[itemPath]); await fluxide.fs.remove(itemPath);
 								this.logToConsole(`Deleted File: ${itemPath}`, 'error');
 								if(this.openTabs.includes(itemPath)) this.closeTab(itemPath);
 								this.renderTree();
@@ -626,19 +749,26 @@ const IDE = {
 							menu.push({ label: 'New Folder', icon: theme.getIcon('newFolder'), action: () => this.promptNew('folder', itemPath) });
 							
 							menu.push({ sep: true }, { label: 'Rename Folder', icon: theme.getIcon('pencil'), action: async () => {
-								const newName = await prompt("Rename Folder", itemPath);
-								if(newName && newName !== itemPath) {
+								const currentName = itemPath.split('/').pop();
+								const newBaseName = await prompt("Rename Folder", currentName);
+								if(newBaseName && newBaseName !== currentName) {
+									const parentPath = itemPath.includes('/') ? itemPath.substring(0, itemPath.lastIndexOf('/')) : '';
+									const newPath = parentPath ? (parentPath + '/' + newBaseName) : newBaseName;
+									
 									Object.keys(state.get().vfs).forEach(async p => {
 										if(p.startsWith(itemPath + '/')) {
 											const content = state.get().vfs[p];
-											const targetPath = p.replace(itemPath + '/', newName + '/');
+											const targetPath = p.replace(itemPath + '/', newPath + '/');
 											state.update(s => { delete s.vfs[p]; s.vfs[targetPath] = content; });
-											await fs.write(targetPath, content); await fs.remove(p);
-											if(this.openTabs.includes(p)) { this.openTabs[this.openTabs.indexOf(p)] = targetPath; if(this.activeTab === p) this.activeTab = targetPath; }
+											await fluxide.fs.write(targetPath, content); await fluxide.fs.remove(p);
+											if(this.openTabs.includes(p)) { 
+												this.openTabs[this.openTabs.indexOf(p)] = targetPath; 
+												if(this.activeTab === p) this.activeTab = targetPath; 
+											}
 										}
 									});
-									this.expandedDirs.delete(itemPath); this.expandedDirs.add(newName);
-									this.logToConsole(`Renamed Folder: ${itemPath} -> ${newName}`, 'info');
+									this.expandedDirs.delete(itemPath); this.expandedDirs.add(newPath);
+									this.logToConsole(`Renamed Folder: ${itemPath} -> ${newPath}`, 'info');
 									this.renderFull();
 								}
 							}});
@@ -646,7 +776,7 @@ const IDE = {
 							menu.push({ sep: true }, { label: 'Delete Folder', icon: theme.getIcon('trash'), danger: true, action: async () => {
 								Object.keys(state.get().vfs).forEach(async p => {
 									if(p.startsWith(itemPath + '/')) {
-										state.update(s => delete s.vfs[p]); await fs.remove(p);
+										state.update(s => delete s.vfs[p]); await fluxide.fs.remove(p);
 										if(this.openTabs.includes(p)) this.closeTab(p);
 									}
 								});
@@ -693,7 +823,7 @@ const IDE = {
 										const newPath = targetPath + '/' + fileName;
 										const content = state.get().vfs[itemPath];
 										state.update(s => { delete s.vfs[itemPath]; s.vfs[newPath] = content; });
-										await fs.write(newPath, content); await fs.remove(itemPath);
+										await fluxide.fs.write(newPath, content); await fluxide.fs.remove(itemPath);
 										if(this.openTabs.includes(itemPath)) {
 											this.openTabs[this.openTabs.indexOf(itemPath)] = newPath;
 											if(this.activeTab === itemPath) this.activeTab = newPath;
@@ -707,7 +837,7 @@ const IDE = {
 												const content = state.get().vfs[p];
 												const newP = p.replace(itemPath + '/', newFolderPath + '/');
 												state.update(s => { delete s.vfs[p]; s.vfs[newP] = content; });
-												await fs.write(newP, content); await fs.remove(p);
+												await fluxide.fs.write(newP, content); await fluxide.fs.remove(p);
 												if(this.openTabs.includes(p)) {
 													this.openTabs[this.openTabs.indexOf(p)] = newP;
 													if(this.activeTab === p) this.activeTab = newP;

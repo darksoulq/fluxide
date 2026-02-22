@@ -1,0 +1,29 @@
+{
+    "id": "dracula",
+    "name": "Dracula",
+    "version": "1.0.0",
+    "author": "Fluxide",
+    "description": "The official Dracula dark theme for Fluxide.",
+    "vars": {
+        "--bg": "#282a36",
+        "--surface": "#21222c",
+        "--surface-low": "#1e1f29",
+        "--surface-high": "#44475a",
+        "--surface-hover": "#44475a",
+        "--border": "#44475a",
+        "--border-bright": "#6272a4",
+        "--text": "#f8f8f2",
+        "--text-dim": "#6272a4",
+        "--text-dark": "#44475a",
+        "--accent": "#bd93f9",
+        "--accent-glow": "rgba(189, 147, 249, 0.15)",
+        "--danger": "#ff5555",
+        "--danger-border": "rgba(255, 85, 85, 0.3)",
+        "--editor-bg": "#282a36",
+        "--radius-sm": "4px",
+        "--radius-md": "8px",
+        "--shadow": "0 4px 6px rgba(0,0,0,0.3)",
+        "--font": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+        "--font-code": "'Fira Code', 'Courier New', monospace"
+    }
+}

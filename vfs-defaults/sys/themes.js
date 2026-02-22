@@ -1,90 +1,94 @@
-// darksoulq/fluxide/darksoulq-fluxide-6f73439658620ffb9d43ea294ca73f49b6c7d35b/vfs-defaults/sys/themes.js
-const { state, expose, emit } = fluxide;
+const { state, emit, expose, on } = fluxide;
 
-fluxide.register({
-	id: 'theme_engine',
-	init() {
-		const themes = {};
-		let activePluginVars = {};
-		const iconPacks = {};
-		const extIcons = { 'js': 'js', 'json': 'json', 'md': 'md' };
-		const nameIcons = {};
-
-		Object.keys(state.get().vfs).forEach(k => {
-			if (k.startsWith('themes/') && k.endsWith('.json')) {
-				try { const t = JSON.parse(state.get().vfs[k]); themes[t.name.toLowerCase()] = t.vars; } catch(e) {}
-			}
-			if (k.startsWith('icon-packs/') && k.endsWith('.json')) {
-				try {
-					const pack = JSON.parse(state.get().vfs[k]);
-					const id = k.replace('icon-packs/', '').replace('.json', '');
-					iconPacks[id] = pack;
-				} catch(e) {}
-			}
-		});
-
-		if(!iconPacks['default']) iconPacks['default'] = { name: "Fallback", icons: { file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>' } };
-
-		expose('theme', {
-			getThemes: () => Object.keys(themes),
-			registerVariables: (pluginId, vars) => {
-				activePluginVars = { ...activePluginVars, ...vars };
-				apply(state.get().settings.theme || 'dracula');
-			},
-			registerIconPack: (id, name, iconsObj) => { iconPacks[id] = { name, icons: iconsObj }; },
-			registerFileIcon: (ext, iconId) => { extIcons[ext] = iconId; },
-			registerNameIcon: (name, iconId) => { nameIcons[name] = iconId; },
-			getIcon: (id) => {
-				const activeId = state.get().settings.icon_pack || 'default';
-				const pack = iconPacks[activeId] || iconPacks['default'];
-				return pack.icons[id] || iconPacks['default'].icons[id] || iconPacks['default'].icons['file'] || '';
-			},
-			getFileIconHtml: (filename) => {
-				const name = filename.split('/').pop();
-				if (nameIcons[name]) return fluxide.theme.getIcon(nameIcons[name]);
-				const ext = name.split('.').pop();
-				if (extIcons[ext]) return fluxide.theme.getIcon(extIcons[ext]);
-				return fluxide.theme.getIcon('file');
-			},
-			getFolderIconHtml: (foldername, isOpen) => {
-				if (nameIcons[foldername]) {
-				    const id = nameIcons[foldername] + (isOpen ? 'Open' : '');
-				    const activeId = state.get().settings.icon_pack || 'default';
-				    const pack = iconPacks[activeId] || iconPacks['default'];
-				    if (pack.icons[id] || iconPacks['default'].icons[id]) return fluxide.theme.getIcon(id);
-				}
-				return fluxide.theme.getIcon(isOpen ? 'folderOpen' : 'folderClosed');
-			},
-			injectCSS: (id, css) => {
-				let el = document.getElementById('fx-css-' + id);
-				if(!el) { el = document.createElement('style'); el.id = 'fx-css-' + id; document.head.appendChild(el); }
-				el.innerHTML = css;
-			}
-		});
-
-        fluxide.settings.register('appearance.themes', {
-            label: 'Themes & Icons',
-            defaults: { theme: 'dracula', icon_pack: 'default' }
+const ThemeManager = {
+    init() {
+        expose('theme', {
+            getIcon: (id) => {
+                const iconPackId = state.get().settings.icon_pack || 'default';
+                const packPath = `icon-packs/${iconPackId}/main.json`;
+                const vfs = state.get().vfs;
+                if (vfs[packPath]) {
+                    try {
+                        const pack = JSON.parse(vfs[packPath]);
+                        if (pack.icons && pack.icons[id]) {
+                            const svgPath = `icon-packs/${iconPackId}/${pack.icons[id].replace('./', '')}`;
+                            if (vfs[svgPath]) return vfs[svgPath];
+                        }
+                    } catch(e) {}
+                }
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>`;
+            },
+            getFileIconHtml: (filename) => {
+                const iconPackId = state.get().settings.icon_pack || 'default';
+                const packPath = `icon-packs/${iconPackId}/main.json`;
+                const vfs = state.get().vfs;
+                const ext = filename.split('.').pop().toLowerCase();
+                
+                if (vfs[packPath]) {
+                    try {
+                        const pack = JSON.parse(vfs[packPath]);
+                        if (pack.fileIcons) {
+                            let ref = pack.fileIcons[ext] || pack.fileIcons['default'];
+                            if (ref) {
+                                const svgPath = `icon-packs/${iconPackId}/${ref.replace('./', '')}`;
+                                if (vfs[svgPath]) return vfs[svgPath];
+                            }
+                        }
+                    } catch(e) {}
+                }
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>`;
+            },
+            getFolderIconHtml: (foldername, isOpen) => {
+                const iconPackId = state.get().settings.icon_pack || 'default';
+                const packPath = `icon-packs/${iconPackId}/main.json`;
+                const vfs = state.get().vfs;
+                
+                if (vfs[packPath]) {
+                    try {
+                        const pack = JSON.parse(vfs[packPath]);
+                        if (pack.folderIcons) {
+                            let ref = isOpen ? (pack.folderIcons['open'] || pack.folderIcons['default']) : pack.folderIcons['default'];
+                            if (ref) {
+                                const svgPath = `icon-packs/${iconPackId}/${ref.replace('./', '')}`;
+                                if (vfs[svgPath]) return vfs[svgPath];
+                            }
+                        }
+                    } catch(e) {}
+                }
+                return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
+            },
+            registerVariables: (pluginId, vars) => {
+                const root = document.documentElement;
+                Object.keys(vars).forEach(k => {
+                    if (!root.style.getPropertyValue(k)) {
+                        root.style.setProperty(k, vars[k]);
+                    }
+                });
+            },
+            applyTheme: (themeId) => this.applyTheme(themeId)
         });
 
-        fluxide.on('settings:render:appearance.themes', ({container}) => {
-            const h = fluxide.ui.h;
-            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Themes & Icons'));
-            container.appendChild(fluxide.settings.createControl('System Theme', 'select', 'theme', { options: Object.keys(themes).map(k => ({ value: k, label: k.toUpperCase() })) }));
-            container.appendChild(fluxide.settings.createControl('Icon Pack', 'select', 'icon_pack', { options: Object.keys(iconPacks).map(k => ({ value: k, label: iconPacks[k].name })) }));
-        });
+        this.applyTheme(state.get().settings.theme || 'dracula');
+    },
 
-        fluxide.on('settings:change', ({key}) => {
-            if (key === 'theme') apply(state.get().settings.theme || 'dracula');
-            if (key === 'icon_pack') emit('workspace:change');
-        });
+    applyTheme(themeId) {
+        const vfs = state.get().vfs;
+        const themePath = `themes/${themeId}/theme.json`;
+        
+        if (vfs[themePath]) {
+            try {
+                const data = JSON.parse(vfs[themePath]);
+                if (data.vars) {
+                    const root = document.documentElement;
+                    Object.keys(data.vars).forEach(k => {
+                        root.style.setProperty(k, data.vars[k]);
+                    });
+                    if (data.vars['--bg']) document.body.style.backgroundColor = data.vars['--bg'];
+                    if (data.vars['--text']) document.body.style.color = data.vars['--text'];
+                }
+            } catch(e) {}
+        }
+    }
+};
 
-		const apply = (id) => {
-			const t = themes[id] || themes['dracula'] || {};
-			const combined = { ...t, ...activePluginVars };
-			const root = document.documentElement;
-			for (let [k,v] of Object.entries(combined)) root.style.setProperty(k, v);
-		};
-		apply(state.get().settings.theme || 'dracula');
-	}
-});
+fluxide.register({ id: 'theme_manager', init: () => ThemeManager.init() });

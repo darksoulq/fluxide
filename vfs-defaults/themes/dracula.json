@@ -1,9 +1,0 @@
-{
-	"name": "Dracula",
-	"vars": {
-		"--bg": "#282a36", "--surface": "#1e1f29", "--surface-low": "#191a21", "--surface-high": "#343746",
-		"--surface-hover": "#44475a", "--border": "#44475a", "--border-bright": "#6272a4", "--accent": "#bd93f9",
-		"--accent-glow": "rgba(189, 147, 249, 0.3)", "--text": "#f8f8f2", "--text-dim": "#6272a4", "--text-dark": "#44475a",
-		"--editor-bg": "#1e1f29", "--card-bg": "#282a36", "--md-code-bg": "#191a21", "--tag-bg": "#44475a"
-	}
-}

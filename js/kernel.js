@@ -1,7 +1,7 @@
 const fluxide = (() => {
-	const r = { plugins: new Map(), views: new Map(), hooks: {}, components: new Map(), settings: [], keybinds: [] };
+	const r = { plugins: new Map(), views: new Map(), hooks: {}, components: new Map(), settings: [], keybinds: [], loadedPlugins: new Map() };
 	const m = {};
-	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', ui_scale: '1.0', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true' }, workspace: null };
+	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', icon_pack: 'default', ui_scale: '1.0', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true', spark_enabled: 'false' }, workspace: null, startupErrors: [] };
 
 	const resolvePath = (baseDir, target) => {
 		if (!target.startsWith('.')) return target;
@@ -27,17 +27,33 @@ const fluxide = (() => {
 		return keys.join('-');
 	};
 
+	const semverSatisfies = (v, req) => {
+		if (!req || req === '*') return true;
+		const rClean = req.replace(/^[~^>=<]+/, '');
+		const [v1, v2, v3] = (v || '1.0.0').split('.').map(Number);
+		const [r1, r2, r3] = rClean.split('.').map(Number);
+		if (req.startsWith('^')) return v1 === r1 && (v2 > r2 || (v2 === r2 && v3 >= r3));
+		if (req.startsWith('~')) return v1 === r1 && v2 === r2 && v3 >= r3;
+		if (req.startsWith('>=')) return v1 > r1 || (v1 === r1 && (v2 > r2 || (v2 === r2 && v3 >= r3)));
+		return v === rClean;
+	};
+
 	const api = {
 		state: { get: () => s, update: (fn) => fn(s) },
 		fs: FSManager,
 		on: (e, cb) => { if(!r.hooks[e]) r.hooks[e] = []; r.hooks[e].push(cb); },
 		emit: (e, d) => { if(r.hooks[e]) r.hooks[e].forEach(cb => cb(d)); },
+		emitAsync: async (e, d) => { if(r.hooks[e]) { for (const cb of r.hooks[e]) await cb(d); } },
 		expose: (id, obj) => { api[id] = obj; },
 		exposeApi: (id, obj) => { api[id] = obj; },
 		registerComponent: (slot, comp) => { if(!r.components.has(slot)) r.components.set(slot, new Map()); r.components.get(slot).set(comp.id, comp); },
 		getComponents: (slot) => Array.from((r.components.get(slot) || new Map()).values()),
 		registerSetting: (cat, st) => { r.settings.push({ category: cat, ...st }); },
 		getSettings: () => r.settings,
+		plugins: {
+			has: (id) => r.loadedPlugins.has(id),
+			get: (id) => r.loadedPlugins.get(id)
+		},
 		keybinds: {
 			register: (id, key, action, description) => {
 				const ex = r.keybinds.findIndex(k => k.id === id);
@@ -85,9 +101,10 @@ const fluxide = (() => {
 				});
 				
 				menu.style.display = 'block'; overlay.style.display = 'block';
-				let left = e.clientX; let top = e.clientY;
-				if(left + menu.offsetWidth > window.innerWidth) left -= menu.offsetWidth;
-				if(top + menu.offsetHeight > window.innerHeight) top -= menu.offsetHeight;
+				const scale = parseFloat(s.settings.ui_scale || '1.0');
+				let left = e.clientX / scale; let top = e.clientY / scale;
+				if(left + (menu.offsetWidth/scale) > (window.innerWidth/scale)) left -= (menu.offsetWidth/scale);
+				if(top + (menu.offsetHeight/scale) > (window.innerHeight/scale)) top -= (menu.offsetHeight/scale);
 				menu.style.left = left + 'px'; menu.style.top = top + 'px';
 				
 				overlay.onclick = () => { menu.style.display = 'none'; overlay.style.display = 'none'; overlay.onclick = null; };
@@ -107,17 +124,7 @@ const fluxide = (() => {
 						setTimeout(() => document.getElementById('prompt-in').focus(), 50);
 					});
 				});
-			},
-			modal: Object.assign((render) => {
-				const overlay = document.getElementById('fx-modal-overlay'); const win = document.getElementById('fx-modal-window');
-				win.style.cssText = ''; win.innerHTML = ''; render(win); overlay.style.display = 'flex'; setTimeout(() => win.classList.add('open'), 10);
-				overlay.onclick = (e) => { if (e.target === overlay) api.ui.modal.close(); };
-			}, { 
-				close: () => {
-					const win = document.getElementById('fx-modal-window'); win.classList.remove('open');
-					setTimeout(() => { document.getElementById('fx-modal-overlay').style.display = 'none'; document.getElementById('fx-modal-overlay').onclick = null; }, 200);
-				} 
-			})
+			}
 		},
 		register: (p) => {
 			r.plugins.set(p.id, p);
@@ -125,7 +132,24 @@ const fluxide = (() => {
 			if(p.init) p.init(api);
 		}
 	};
-	
+
+	let _modal = Object.assign((render) => {
+		const overlay = document.getElementById('fx-modal-overlay'); const win = document.getElementById('fx-modal-window');
+		win.style.cssText = ''; win.innerHTML = ''; render(win); overlay.style.display = 'flex'; setTimeout(() => win.classList.add('open'), 10);
+		overlay.onclick = (e) => { if (e.target === overlay) { api.emit('settings:cancel'); api.ui.modal.close(); } };
+	}, { 
+		close: () => {
+			const win = document.getElementById('fx-modal-window'); win.classList.remove('open');
+			setTimeout(() => { document.getElementById('fx-modal-overlay').style.display = 'none'; document.getElementById('fx-modal-overlay').onclick = null; }, 200);
+		} 
+	});
+
+	Object.defineProperty(api.ui, 'modal', {
+		get: () => _modal,
+		set: (v) => { if (v && typeof v === 'function' && !v.close) v.close = _modal.close; _modal = v; },
+		enumerable: true, configurable: true
+	});
+
 	api.registerPlugin = api.register;
 	window.Fluxide = api;
 	window.api = api;
@@ -152,7 +176,7 @@ const fluxide = (() => {
 		async startServices() {
 			const loadScreen = document.getElementById('fx-loading-screen');
 			const isInit = await FSManager.exists('.fluxide/init.json');
-			const hasIcons = await FSManager.exists('icon-packs/default.json');
+			const hasIcons = await FSManager.exists('icon-packs/default/main.json');
 			
 			if (!isInit || !hasIcons) {
 				loadScreen.style.display = 'flex';
@@ -160,13 +184,41 @@ const fluxide = (() => {
 				const bar = document.getElementById('fx-loading-bar');
 				
 				const defaultFilesToFetch = [
-					'icon-packs/default.json',
-					'themes/dracula.json',
-					'themes/catppuccin.json',
-					'themes/flat_dark.json',
+					'icon-packs/default/main.json',
+					'icon-packs/default/icons/terminal.svg',
+					'icon-packs/default/icons/search.svg',
+					'icon-packs/default/icons/replace.svg',
+					'icon-packs/default/icons/matchCase.svg',
+					'icon-packs/default/icons/matchWord.svg',
+					'icon-packs/default/icons/arrowUp.svg',
+					'icon-packs/default/icons/arrowDown.svg',
+					'icon-packs/default/icons/close.svg',
+					'icon-packs/default/icons/chevronRight.svg',
+					'icon-packs/default/icons/chevronDown.svg',
+					'icon-packs/default/icons/refresh.svg',
+					'icon-packs/default/icons/collapseAll.svg',
+					'icon-packs/default/icons/docs.svg',
+					'icon-packs/default/icons/save.svg',
+					'icon-packs/default/icons/pencil.svg',
+					'icon-packs/default/icons/trash.svg',
+					'icon-packs/default/icons/newFile.svg',
+					'icon-packs/default/icons/newFolder.svg',
+					'icon-packs/default/icons/plugin.svg',
+					'icon-packs/default/icons/file.svg',
+					'icon-packs/default/icons/file-js.svg',
+					'icon-packs/default/icons/file-json.svg',
+					'icon-packs/default/icons/file-md.svg',
+					'icon-packs/default/icons/file-css.svg',
+					'icon-packs/default/icons/file-html.svg',
+					'icon-packs/default/icons/folder.svg',
+					'icon-packs/default/icons/folder-open.svg',
+					'themes/dracula/theme.json',
+					'themes/catppuccin/theme.json',
+					'themes/flat_dark/theme.json',
 					'sys/themes.js',
 					'sys/settings.js',
 					'sys/ide.js',
+					'sys/spark.js',
 					'sys/docs/index.json',
 					'sys/docs/kernel/state_events.md',
 					'sys/docs/kernel/fs.md',
@@ -174,20 +226,6 @@ const fluxide = (() => {
 					'sys/docs/kernel/registry.md',
 					'sys/docs/sys/theme.md',
 					'sys/docs/sys/ide.md',
-					'plugins/board/plugin.json',
-					'plugins/board/src/main.js',
-					'plugins/board/src/task_viewer.js',
-					'plugins/board/docs/index.json',
-					'plugins/board/docs/api_board.md',
-					'plugins/board/docs/api_task.md',
-					'plugins/board/docs/components.md',
-					'plugins/board/docs/context_menus.md',
-					'plugins/board/docs/theme.md',
-					'plugins/graph/plugin.json',
-					'plugins/graph/src/main.js',
-					'plugins/graph/docs/index.json',
-					'plugins/graph/docs/api_graph.md',
-					'plugins/graph/docs/theme.md',
 					'plugins/workspace_zip/plugin.json',
 					'plugins/workspace_zip/src/main.js',
 					'plugins/manager/plugin.json',
@@ -243,28 +281,72 @@ const fluxide = (() => {
 			const tip = document.getElementById('fx-tooltip');
 			document.addEventListener('mouseover', (e) => {
 				const txt = e.target.getAttribute('data-tooltip');
-				if(txt) { tip.innerText = txt; tip.style.display = 'block'; tip.style.left = e.clientX + 'px'; tip.style.top = e.clientY + 'px'; }
+				if(txt) { 
+					tip.innerText = txt; tip.style.display = 'block'; 
+					const scale = parseFloat(s.settings.ui_scale || '1.0');
+					tip.style.left = (e.clientX / scale) + 10 + 'px'; 
+					tip.style.top = (e.clientY / scale) + 10 + 'px'; 
+				}
 			});
 			document.addEventListener('mouseout', () => tip.style.display = 'none');
 
-			['sys/settings.js', 'sys/themes.js', 'sys/ide.js'].forEach(p => { if(s.vfs[p]) this.require(p); });
+			['sys/settings.js', 'sys/themes.js', 'sys/ide.js', 'sys/spark.js'].forEach(p => { 
+                if(s.vfs[p]) {
+                    try { this.require(p); } catch(e) {}
+                }
+            });
 			
 			const queue = [];
 			Object.keys(s.vfs).forEach(path => {
 				if (path.startsWith('plugins/') && path.endsWith('/plugin.json')) {
-					try { queue.push({ meta: JSON.parse(s.vfs[path]), dirName: path.substring(0, path.lastIndexOf('/')) }); } catch(e) {}
+                    const parts = path.split('/');
+                    if(parts.length !== 3) return;
+					try {
+                        const meta = JSON.parse(s.vfs[path]);
+                        if(!meta.name || !meta.version || !meta.entry || !meta.entry.startsWith('./')) return;
+                        queue.push({ meta, dirName: path.substring(0, path.lastIndexOf('/')) });
+                    } catch(e) {}
 				}
 			});
 
 			const sorted = [];
 			const visited = new Set();
+			const visiting = new Set();
+			const failedPlugins = new Set();
+
 			const visit = (p) => {
-				if (visited.has(p.meta.id)) return;
-				(p.meta.deps || []).forEach(depId => { const dep = queue.find(q => q.meta.id === depId); if (dep) visit(dep); });
-				visited.add(p.meta.id); sorted.push(p);
+				if (visited.has(p.meta.id)) return !failedPlugins.has(p.meta.id);
+				if (visiting.has(p.meta.id)) { failedPlugins.add(p.meta.id); return false; }
+				visiting.add(p.meta.id);
+				let depsMet = true;
+				(p.meta.deps || []).forEach(d => {
+					const dId = typeof d === 'string' ? d : d.id;
+					const dType = typeof d === 'string' ? 'hard' : (d.type || 'hard');
+					const dVer = typeof d === 'string' ? '*' : (d.version || '*');
+					const depNode = queue.find(q => q.meta.id === dId);
+					if (depNode) {
+						if (semverSatisfies(depNode.meta.version, dVer)) {
+							const ok = visit(depNode);
+							if (!ok && dType === 'hard') depsMet = false;
+						} else if (dType === 'hard') depsMet = false;
+					} else if (dType === 'hard') depsMet = false;
+				});
+				visiting.delete(p.meta.id);
+				visited.add(p.meta.id);
+				if (!depsMet) { failedPlugins.add(p.meta.id); return false; }
+				sorted.push(p);
+				return true;
 			};
 			queue.forEach(visit);
-			sorted.forEach(p => { if(p.meta.entry) this.require(p.meta.entry, p.dirName); });
+
+			sorted.forEach(p => { 
+				if(p.meta.entry) {
+                    try {
+					    this.require(p.meta.entry, p.dirName); 
+					    r.loadedPlugins.set(p.meta.id, p.meta);
+                    } catch(e) {}
+				}
+			});
 
 			api.ui.openView(s.activeView);
 		},
@@ -278,8 +360,22 @@ const fluxide = (() => {
 			if (target.endsWith('.json')) { const exp = JSON.parse(content); m[target] = { exports: exp }; return exp; }
 			const module = { exports: {} }; m[target] = module;
 			const dirName = target.includes('/') ? target.substring(0, target.lastIndexOf('/')) : '';
-			const wrapper = new Function('module', 'exports', 'require', 'Fluxide', 'api', 'fluxide', '__dirname', '__filename', content);
-			wrapper(module, module.exports, (p) => this.require(p, dirName), api, api, api, dirName, target);
+			
+            try {
+                const wrapper = new Function('module', 'exports', 'require', 'Fluxide', 'api', 'fluxide', '__dirname', '__filename', content + '\n//# sourceURL=' + target);
+			    wrapper(module, module.exports, (p) => this.require(p, dirName), api, api, api, dirName, target);
+            } catch (e) {
+                let line = 1, ch = 0;
+                const lines = (e.stack || '').split('\n');
+                const targetLine = lines.find(l => l.includes(target) || l.includes('<anonymous>'));
+                if (targetLine) {
+                    const match = targetLine.match(/:(\d+):(\d+)/);
+                    if (match) { line = Math.max(1, parseInt(match[1]) - 2); ch = parseInt(match[2]); }
+                }
+                if (!s.startupErrors) s.startupErrors = [];
+                s.startupErrors.push({ path: target, error: e.toString(), line, ch });
+                throw e;
+            }
 			return module.exports;
 		}
 	};

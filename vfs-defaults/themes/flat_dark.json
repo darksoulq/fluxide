@@ -1,9 +1,0 @@
-{
-	"name": "Flat Dark",
-	"vars": {
-		"--bg": "#121212", "--surface": "#1e1e1e", "--surface-low": "#0a0a0a", "--surface-high": "#2c2c2c",
-		"--surface-hover": "#3c3c3c", "--border": "#333333", "--border-bright": "#555555", "--accent": "#00ffaa",
-		"--accent-glow": "rgba(0, 255, 170, 0.3)", "--text": "#eeeeee", "--text-dim": "#888888", "--text-dark": "#444444",
-		"--editor-bg": "#000000", "--card-bg": "#1e1e1e", "--md-code-bg": "#0a0a0a", "--tag-bg": "#2c2c2c"
-	}
-}

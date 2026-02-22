@@ -1,0 +1,40 @@
+{
+    "id": "default",
+    "name": "Default Icons",
+    "version": "1.0.0",
+    "author": "Fluxide",
+    "description": "The default icon pack for Fluxide.",
+    "icons": {
+        "terminal": "./icons/terminal.svg",
+        "search": "./icons/search.svg",
+        "replace": "./icons/replace.svg",
+        "matchCase": "./icons/matchCase.svg",
+        "matchWord": "./icons/matchWord.svg",
+        "arrowUp": "./icons/arrowUp.svg",
+        "arrowDown": "./icons/arrowDown.svg",
+        "close": "./icons/close.svg",
+        "chevronRight": "./icons/chevronRight.svg",
+        "chevronDown": "./icons/chevronDown.svg",
+        "refresh": "./icons/refresh.svg",
+        "collapseAll": "./icons/collapseAll.svg",
+        "docs": "./icons/docs.svg",
+        "save": "./icons/save.svg",
+        "pencil": "./icons/pencil.svg",
+        "trash": "./icons/trash.svg",
+        "newFile": "./icons/newFile.svg",
+        "newFolder": "./icons/newFolder.svg",
+        "plugin": "./icons/plugin.svg"
+    },
+    "fileIcons": {
+        "default": "./icons/file.svg",
+        "js": "./icons/file-js.svg",
+        "json": "./icons/file-json.svg",
+        "md": "./icons/file-md.svg",
+        "css": "./icons/file-css.svg",
+        "html": "./icons/file-html.svg"
+    },
+    "folderIcons": {
+        "default": "./icons/folder.svg",
+        "open": "./icons/folder-open.svg"
+    }
+}

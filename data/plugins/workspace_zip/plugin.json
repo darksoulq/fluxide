@@ -1,7 +1,0 @@
-{
-	"id": "workspace_zip",
-	"name": "Workspace Zip",
-	"version": "1.0.0",
-	"description": "Import and export workspace zip",
-	"entry": "./src/main.js"
-}

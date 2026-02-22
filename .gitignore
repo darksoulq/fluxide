@@ -1,0 +1,10 @@
+prism_ui/plugin.json
+prism_ui/docs/.keep
+prism_ui/docs/data.md
+prism_ui/docs/getting_started.md
+prism_ui/docs/index.json
+prism_ui/docs/inputs.md
+prism_ui/docs/layouts.md
+prism_ui/docs/theming.md
+prism_ui/docs/typography.md
+prism_ui/src/main.js

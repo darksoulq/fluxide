@@ -1,6 +1,0 @@
-{
-	"id": "graph",
-	"name": "Network Graph",
-	"entry": "./src/main.js",
-	"deps": []
-}
