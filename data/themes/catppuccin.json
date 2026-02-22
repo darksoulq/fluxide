@@ -1,0 +1,9 @@
+{
+	"name": "Catppuccin",
+	"vars": {
+		"--bg": "#1e1e2e", "--surface": "#181825", "--surface-low": "#11111b", "--surface-high": "#313244",
+		"--surface-hover": "#45475a", "--border": "#313244", "--border-bright": "#45475a", "--accent": "#cba6f7",
+		"--accent-glow": "rgba(203, 166, 247, 0.3)", "--text": "#cdd6f4", "--text-dim": "#a6adc8", "--text-dark": "#585b70",
+		"--editor-bg": "#11111b", "--card-bg": "#181825", "--md-code-bg": "#11111b", "--tag-bg": "#313244"
+	}
+}

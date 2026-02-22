@@ -1,0 +1,13 @@
+{
+	"theme": "dracula",
+	"ui_scale": "1",
+	"dev_mode": "false",
+	"word_wrap": "false",
+	"code_folding": "true",
+	"active_line": "true",
+	"line_numbers": "true",
+	"tab_size": "4",
+	"use_tabs": "true",
+	"match_brackets": "true",
+	"auto_close_brackets": "true"
+}

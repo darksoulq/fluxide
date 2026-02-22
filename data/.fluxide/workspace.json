@@ -1,0 +1,45 @@
+{
+	"columns": [
+		{
+			"id": "c1",
+			"title": "BACKLOG",
+			"tasks": [
+				{
+					"id": "t1",
+					"title": "Drag & Drop Custom Engine",
+					"priority": "high",
+					"tags": [
+						"sys",
+						"core"
+					],
+					"deps": [],
+					"desc": "Complete custom mouse-tracker overrides HTML5 limitations.",
+					"todos": []
+				},
+				{
+					"id": "t2",
+					"title": "Topological Boot",
+					"priority": "medium",
+					"tags": [
+						"architecture"
+					],
+					"deps": [
+						"t1"
+					],
+					"desc": "Plugins evaluate dependencies securely.",
+					"todos": []
+				}
+			]
+		},
+		{
+			"id": "c2",
+			"title": "IN PROGRESS",
+			"tasks": []
+		},
+		{
+			"id": "c3",
+			"title": "DONE",
+			"tasks": []
+		}
+	]
+}
