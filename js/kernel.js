@@ -67,7 +67,7 @@ const fluxide = (() => {
 				const plugin = r.views.get(id); if(plugin && plugin.render) plugin.render(viewport, api);
 				
 				const nav = document.getElementById('fx-nav'); nav.innerHTML = '';
-				const sortedViews = Array.from(r.views.values()).sort((a,b) => (a.view.order || 0) - (b.view.order || 0));
+				const sortedViews = Array.from(r.views.values()).filter(p => p.view.nav).sort((a,b) => (a.view.order || 0) - (b.view.order || 0));
 				sortedViews.forEach(p => nav.appendChild(h('button', { class: 'fx-btn' + (s.activeView === p.view.id ? ' fx-btn-primary' : ''), style: { letterSpacing: '0.5px' }, onClick: () => api.ui.openView(p.view.id) }, p.view.label.toUpperCase())));
 			},
 			context: (e, items) => {
@@ -246,7 +246,7 @@ const fluxide = (() => {
 			});
 			document.addEventListener('mouseout', () => tip.style.display = 'none');
 
-			['sys/themes.js', 'sys/settings.js', 'sys/ide.js'].forEach(p => { if(s.vfs[p]) this.require(p); });
+			['sys/settings.js', 'sys/themes.js', 'sys/ide.js'].forEach(p => { if(s.vfs[p]) this.require(p); });
 			
 			const queue = [];
 			Object.keys(s.vfs).forEach(path => {

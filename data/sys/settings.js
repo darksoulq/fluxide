@@ -2,36 +2,62 @@ const { h } = fluxide.ui;
 const { state, emit, expose, on } = fluxide;
 
 const Settings = {
-    init() {
-        state.update(s => {
-            s.settings.tree = [
-                { id: 'appearance', label: 'Appearance' },
-                { id: 'keybinds', label: 'Keybindings' }
-            ];
-            s.settings.expanded = new Set(['appearance', 'keybinds']);
-        });
+    tree: [
+        { id: 'appearance', label: 'Appearance' },
+        { id: 'keybinds', label: 'Keybindings' }
+    ],
+    expanded: new Set(['appearance', 'keybinds']),
+    activeTab: 'appearance',
+    _container: null,
 
+    init() {
         expose('settings', {
             register: (id, config) => {
-                state.update(s => {
-                    const node = { id, label: config.label || id, children: config.sections || [] };
-                    const existing = s.settings.tree.findIndex(n => n.id === id);
-                    if (existing > -1) s.settings.tree[existing] = node;
-                    else s.settings.tree.push(node);
+                const node = { id, label: config.label || id, children: config.sections || [] };
+                const existing = this.tree.findIndex(n => n.id === id);
+                if (existing > -1) this.tree[existing] = node;
+                else this.tree.push(node);
 
-                    if (config.defaults) {
+                if (config.defaults) {
+                    state.update(s => {
                         Object.keys(config.defaults).forEach(k => {
-                            if (s.settings.values[k] === undefined) s.settings.values[k] = config.defaults[k];
+                            if (s.settings[k] === undefined) s.settings[k] = config.defaults[k];
                         });
-                    }
-                });
+                    });
+                }
             },
-            get: (key) => state.get().settings.values[key],
+            get: (key) => state.get().settings[key],
             set: (key, val) => {
-                state.update(s => { s.settings.values[key] = val; });
+                state.update(s => { s.settings[key] = val; });
                 emit('settings:change', { key, val });
+            },
+            createControl: (label, type, key, opts = {}) => {
+                const val = state.get().settings[key];
+                const input = type === 'select' 
+                    ? h('select', { class: 'fx-select', onChange: (e) => fluxide.settings.set(key, e.target.value) }, 
+                        opts.options.map(o => typeof o === 'string' ? h('option', { value: o, selected: o === val }, o) : h('option', { value: o.value, selected: o.value === val }, o.label)))
+                    : h('input', { 
+                        class: 'fx-input', type, ...opts, value: val, 
+                        onChange: (e) => fluxide.settings.set(key, e.target.value) 
+                    });
+
+                return h('div', { class: 'fx-form-group', style: { marginBottom: '20px' } }, [ h('label', { class: 'fx-form-label' }, label), input ]);
             }
         });
+
+        setTimeout(() => {
+            const status = document.getElementById('fx-status');
+            if(status && !document.getElementById('settings-nav-btn')) {
+                const btn = h('button', { 
+                    id: 'settings-nav-btn',
+                    class: 'fx-icon-btn', 
+                    style: { width: '28px', height: '28px' },
+                    innerHTML: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>',
+                    onClick: () => fluxide.ui.openView('settings') 
+                });
+                status.appendChild(btn);
+            }
+        }, 100);
     },
 
     render(container) {
@@ -41,42 +67,39 @@ const Settings = {
         container.style.height = '100%';
         container.innerHTML = '';
 
-        const s = state.get().settings;
-
-        const sidebar = h('div', { class: 'fx-settings-sidebar' }, [
-            h('div', { class: 'fx-settings-header' }, 'SETTINGS'),
-            h('div', { class: 'fx-settings-tree' }, this.renderTree(s.tree, 0))
+        const sidebar = h('div', { class: 'fx-settings-sidebar', style: { borderRight: '1px solid var(--border)', background: 'var(--surface-low)', overflowY: 'auto' } }, [
+            h('div', { class: 'fx-settings-header', style: { padding: '20px', fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '1px' } }, 'SETTINGS'),
+            h('div', { class: 'fx-settings-tree' }, this.renderTree(this.tree, 0))
         ]);
 
-        const content = h('div', { class: 'fx-settings-content' });
-        this.renderActiveTab(content, s.activeTab);
+        const content = h('div', { class: 'fx-settings-content', style: { padding: '40px', overflowY: 'auto', background: 'var(--bg)' } });
+        this.renderActiveTab(content, this.activeTab);
 
         container.appendChild(sidebar);
         container.appendChild(content);
     },
 
     renderTree(nodes, depth) {
-        const s = state.get().settings;
         return nodes.map(node => {
             const hasChildren = node.children && node.children.length > 0;
-            const isExpanded = s.expanded.has(node.id);
-            const isActive = s.activeTab === node.id;
+            const isExpanded = this.expanded.has(node.id);
+            const isActive = this.activeTab === node.id;
 
             const el = h('div', {
                 class: `tree-node ${isActive ? 'active' : ''}`,
-                style: { paddingLeft: (depth * 14 + 12) + 'px' },
+                style: { paddingLeft: (depth * 14 + 12) + 'px', padding: '8px 12px 8px ' + (depth * 14 + 12) + 'px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: isActive ? 'var(--text)' : 'var(--text-dim)', background: isActive ? 'var(--accent-glow)' : 'transparent', borderRadius: 'var(--radius-sm)', margin: '0 10px 2px 10px' },
+                onMouseOver: (e) => { if(!isActive) e.currentTarget.style.background = 'var(--surface-hover)'; },
+                onMouseOut: (e) => { if(!isActive) e.currentTarget.style.background = 'transparent'; },
                 onClick: () => {
-                    state.update(st => {
-                        st.settings.activeTab = node.id;
-                        if (hasChildren) {
-                            st.settings.expanded.has(node.id) ? st.settings.expanded.delete(node.id) : st.settings.expanded.add(node.id);
-                        }
-                    });
+                    this.activeTab = node.id;
+                    if (hasChildren) {
+                        this.expanded.has(node.id) ? this.expanded.delete(node.id) : this.expanded.add(node.id);
+                    }
                     this.render(this._container);
                 }
             }, [
-                hasChildren ? h('div', { class: 'tree-arrow', innerHTML: isExpanded ? '▼' : '▶' }) : h('div', { style: 'width:12px' }),
-                h('span', {}, node.label)
+                hasChildren ? h('div', { style: { width: '12px', display: 'flex', alignItems: 'center' }, innerHTML: isExpanded ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>' }) : h('div', { style: { width: '12px' } }),
+                h('span', { style: { fontWeight: isActive ? 600 : 500, fontSize: '13px' } }, node.label)
             ]);
 
             if (hasChildren && isExpanded) {
@@ -87,19 +110,19 @@ const Settings = {
     },
 
     renderActiveTab(container, id) {
-        const values = state.get().settings.values;
+        const values = state.get().settings;
 
         if (id === 'appearance') {
-            container.appendChild(h('h2', {}, 'Appearance'));
-            container.appendChild(this.createControl('UI Scale', 'range', 'ui_scale', { min: 0.7, max: 1.3, step: 0.05 }));
-            container.appendChild(this.createControl('Theme', 'select', 'theme', { options: ['dracula', 'catppuccin', 'flat_dark'] }));
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Appearance'));
+            container.appendChild(fluxide.settings.createControl('UI Scale', 'number', 'ui_scale', { step: 0.05 }));
         } else if (id === 'keybinds') {
-            container.appendChild(h('h2', {}, 'Keybindings'));
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Keybindings'));
             fluxide.keybinds.getAll().forEach(kb => {
-                const row = h('div', { class: 'fx-kb-row' }, [
-                    h('div', { class: 'fx-kb-info' }, [ h('div', { class: 'fx-kb-label' }, kb.description), h('div', { class: 'fx-kb-id' }, kb.id) ]),
+                const row = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 0', borderBottom: '1px solid var(--border)' } }, [
+                    h('div', {}, [ h('div', { style: { fontWeight: 600, fontSize: '13px', marginBottom: '4px' } }, kb.description), h('div', { style: { fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-code)' } }, kb.id) ]),
                     h('input', {
-                        class: 'fx-input fx-kb-input',
+                        class: 'fx-input',
+                        style: { width: '150px', textAlign: 'center', fontFamily: 'var(--font-code)' },
                         value: kb.key,
                         onKeyDown: (e) => {
                             e.preventDefault();
@@ -111,7 +134,7 @@ const Settings = {
                                 keys.push(e.key.length === 1 ? e.key.toUpperCase() : e.key);
                                 const newKey = keys.join('-');
                                 e.target.value = newKey;
-                                fluxide.keybinds.update(kb.id, newKey);
+                                fluxide.keybinds.register(kb.id, newKey, kb.action, kb.description);
                                 emit('settings:change');
                             }
                         }
@@ -120,24 +143,9 @@ const Settings = {
                 container.appendChild(row);
             });
         } else {
-            const pluginId = id.split('.')[0];
-            const sectionId = id.includes('.') ? id.split('.')[1] : null;
             emit(`settings:render:${id}`, { container, values });
         }
-    },
-
-    createControl(label, type, key, opts = {}) {
-        const val = state.get().settings.values[key];
-        const input = type === 'select' 
-            ? h('select', { class: 'fx-select', onChange: (e) => fluxide.settings.set(key, e.target.value) }, 
-                opts.options.map(o => h('option', { value: o, selected: o === val }, o)))
-            : h('input', { 
-                class: 'fx-input', type, ...opts, value: val, 
-                onChange: (e) => fluxide.settings.set(key, e.target.value) 
-            });
-
-        return h('div', { class: 'fx-form-group' }, [ h('label', {}, label), input ]);
     }
 };
 
-fluxide.register({ id: 'settings', view: { id: 'settings', label: 'Settings', order: 99 }, init: () => Settings.init(), render: (c) => Settings.render(c) });
+fluxide.register({ id: 'settings', view: { id: 'settings', label: 'Settings', nav: false, order: 99 }, init: () => Settings.init(), render: (c) => Settings.render(c) });

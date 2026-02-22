@@ -60,6 +60,24 @@ const IDE = {
 		keybinds.register('ide.search', 'Ctrl-F', () => { this.toggleSearch(false); }, "Search within file");
 		keybinds.register('ide.replace', 'Ctrl-H', () => { this.toggleSearch(true); }, "Replace within file");
 		
+		fluxide.settings.register('ide', {
+			label: 'Editor',
+			defaults: { word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true', font_size: '14' }
+		});
+		
+		on('settings:render:ide', ({container}) => {
+			container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Editor Settings'));
+			container.appendChild(fluxide.settings.createControl('Font Size', 'number', 'font_size'));
+			container.appendChild(fluxide.settings.createControl('Tab Size', 'number', 'tab_size'));
+			container.appendChild(fluxide.settings.createControl('Word Wrap', 'select', 'word_wrap', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Code Folding', 'select', 'code_folding', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Active Line Highlight', 'select', 'active_line', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Line Numbers', 'select', 'line_numbers', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Use Tabs', 'select', 'use_tabs', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Match Brackets', 'select', 'match_brackets', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+			container.appendChild(fluxide.settings.createControl('Auto Close Brackets', 'select', 'auto_close_brackets', { options: [{value:'true', label:'On'}, {value:'false', label:'Off'}] }));
+		});
+
 		on('workspace:change', () => { if(state.get().activeView === 'ide') this.renderTree(); });
 		on('settings:change', () => { this.updateEditorSettings(); });
 	},
@@ -90,7 +108,7 @@ const IDE = {
 			});
 			const inputContainer = h('div', { style: { display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0 12px' } }, [
 				h('div', { innerHTML: theme.getIcon('search'), style: { width: '16px', height: '16px', color: 'var(--text-dim)' } }),
-				h('input', { class: 'fx-input', style: { border: 'none', background: 'transparent', boxShadow: 'none' }, placeholder: 'Search files (e.g. main.js)...' })
+				h('input', { class: 'fx-input', style: { border: 'none', background: 'transparent', boxShadow: 'none' }, placeholder: 'Search files...' })
 			]);
 			const input = inputContainer.querySelector('input');
 			const list = h('div', { style: { marginTop: '10px', maxHeight: '350px', overflowY: 'auto' } });
@@ -284,11 +302,13 @@ const IDE = {
 		this.cm.setOption('indentWithTabs', s.use_tabs !== 'false');
 		this.cm.setOption('matchBrackets', s.match_brackets !== 'false');
 		this.cm.setOption('autoCloseBrackets', s.auto_close_brackets !== 'false');
+		this.editorContainer.style.fontSize = (s.font_size || '14') + 'px';
 		
 		let gutters = [];
 		if(s.line_numbers !== 'false') gutters.push("CodeMirror-linenumbers");
 		if(s.code_folding !== 'false') gutters.push("CodeMirror-foldgutter");
 		this.cm.setOption('gutters', gutters);
+		this.cm.refresh();
 	},
 
 	updateStatusBar() {

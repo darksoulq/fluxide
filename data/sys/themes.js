@@ -1,4 +1,4 @@
-const { state, expose, registerSetting, emit } = fluxide;
+const { state, expose, emit } = fluxide;
 
 fluxide.register({
 	id: 'theme_engine',
@@ -61,17 +61,22 @@ fluxide.register({
 			}
 		});
 
-		registerSetting('Appearance', {
-			id: 'theme', label: 'System Theme', type: 'select', 
-			getOptions: () => Object.keys(themes).map(k => ({ value: k, label: k.toUpperCase() })),
-			onchange: (val) => apply(val)
-		});
+        fluxide.settings.register('themes', {
+            label: 'Themes & Icons',
+            defaults: { theme: 'dracula', icon_pack: 'default' }
+        });
 
-		registerSetting('Appearance', {
-			id: 'icon_pack', label: 'Icon Pack', type: 'select', 
-			getOptions: () => Object.keys(iconPacks).map(k => ({ value: k, label: iconPacks[k].name })),
-			onchange: () => emit('workspace:change')
-		});
+        fluxide.on('settings:render:themes', ({container}) => {
+            const h = fluxide.ui.h;
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px' } }, 'Themes & Icons'));
+            container.appendChild(fluxide.settings.createControl('System Theme', 'select', 'theme', { options: Object.keys(themes).map(k => ({ value: k, label: k.toUpperCase() })) }));
+            container.appendChild(fluxide.settings.createControl('Icon Pack', 'select', 'icon_pack', { options: Object.keys(iconPacks).map(k => ({ value: k, label: iconPacks[k].name })) }));
+        });
+
+        fluxide.on('settings:change', ({key}) => {
+            if (key === 'theme') apply(state.get().settings.theme || 'dracula');
+            if (key === 'icon_pack') emit('workspace:change');
+        });
 
 		const apply = (id) => {
 			const t = themes[id] || themes['dracula'] || {};
