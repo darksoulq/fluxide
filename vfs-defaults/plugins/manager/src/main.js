@@ -30,44 +30,36 @@ fluxide.register({
                 ]));
 
                 (async () => {
+                    let totalSteps = 0;
+                    for (const a of pendingActions) {
+                        if (a.type === 'install') totalSteps += Object.keys(a.files || {}).length;
+                        else totalSteps += 1;
+                    }
+                    let currentStep = 0;
+
                     for (let i = 0; i < pendingActions.length; i++) {
                         const action = pendingActions[i];
-                        pText.innerText = `Processing ${action.name || action.path}...`;
-                        pBar.style.width = ((i / pendingActions.length) * 100) + '%';
                         
-                        if (action.type === 'delete') {
+                        if (action.type === 'install') {
+                            pText.innerText = `Placing files for ${action.name || action.itemId}...`;
+                            for (const [path, content] of Object.entries(action.files || {})) {
+                                state.get().vfs[path] = content;
+                                await fs.write(path, content);
+                                currentStep++;
+                                pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
+                            }
+                        } else if (action.type === 'delete') {
+                            pText.innerText = `Removing ${action.name || action.itemId}...`;
                             const pathsToDel = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
                             for (const p of pathsToDel) {
                                 delete state.get().vfs[p];
                                 await fs.remove(p);
                             }
                             await fs.remove(action.path);
-                        } else if (action.type === 'install') {
-                            try {
-                                const res = await fetch(`https://darksoulq.pythonanywhere.com/api/versions/${action.vid}/extract`);
-                                const data = await res.json();
-                                if (data.files) {
-                                    const baseDir = action.itemType === 'plugin' ? 'plugins' : (action.itemType === 'theme' ? 'themes' : 'icon-packs');
-                                    const basePath = `${baseDir}/${action.itemId}`;
-                                    for (const [path, fileData] of Object.entries(data.files)) {
-                                        const fullPath = `${basePath}/${path}`;
-                                        if (fileData.binary) {
-                                            const binStr = atob(fileData.data);
-                                            const len = binStr.length;
-                                            const bytes = new Uint8Array(len);
-                                            for (let j = 0; j < len; j++) bytes[j] = binStr.charCodeAt(j);
-                                            const ext = path.split('.').pop();
-                                            const blob = new Blob([bytes], { type: `application/${ext}` });
-                                            state.get().vfs[fullPath] = blob;
-                                            await fs.write(fullPath, blob);
-                                        } else {
-                                            state.get().vfs[fullPath] = fileData.data;
-                                            await fs.write(fullPath, fileData.data);
-                                        }
-                                    }
-                                }
-                            } catch(e) {}
+                            currentStep++;
+                            pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                         } else if (action.type === 'disable' || action.type === 'enable') {
+                            pText.innerText = `${action.type === 'disable' ? 'Disabling' : 'Enabling'} ${action.name || action.itemId}...`;
                             const targetBase = action.type === 'disable' ? 'disabled' : (action.itemType === 'plugin' ? 'plugins' : (action.itemType === 'theme' ? 'themes' : 'icon-packs'));
                             const targetPath = `${targetBase}/${action.itemId}`;
                             const pathsToMove = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
@@ -79,10 +71,13 @@ fluxide.register({
                                 await fs.remove(p);
                             }
                             await fs.remove(action.path);
+                            currentStep++;
+                            pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                         }
                     }
-                    pBar.style.width = '100%';
+                    
                     pText.innerText = 'Reloading IDE...';
+                    pBar.style.width = '100%';
                     setTimeout(() => location.reload(), 500);
                 })();
             });
@@ -133,13 +128,57 @@ fluxide.register({
 
                     const actionBtn = h('button', {
                         class: 'fx-btn' + (isInstalled || isDisabled || queuedInstall ? '' : ' fx-btn-primary'),
-                        style: { padding: '10px 24px', fontSize: '14px' },
+                        style: { padding: '10px 24px', fontSize: '14px', transition: '0.2s' },
                         disabled: isInstalled || isDisabled || queuedInstall,
-                        onClick: () => {
+                        onClick: async (e) => {
+                            const btn = e.target;
                             const vid = document.getElementById('version-select').value;
-                            pendingActions.push({ type: 'install', vid, name: data.name, itemType: data.type, itemId: data.item_id });
-                            fluxide.settings.requestReload();
-                            renderUI();
+                            
+                            const pBarContainer = h('div', { style: { width: '100px', height: '8px', background: 'var(--surface-high)', borderRadius: '4px', overflow: 'hidden' } });
+                            const pBar = h('div', { style: { width: '0%', height: '100%', background: 'var(--accent)', transition: 'width 0.1s linear' } });
+                            pBarContainer.appendChild(pBar);
+                            btn.parentNode.replaceChild(pBarContainer, btn);
+
+                            try {
+                                const zipRes = await fetch(`https://darksoulq.pythonanywhere.com/api/versions/${vid}/download`);
+                                const arrayBuffer = await zipRes.arrayBuffer();
+                                const zip = await window.JSZip.loadAsync(arrayBuffer);
+                                const files = Object.values(zip.files);
+                                
+                                let rootFolder = '';
+                                let metaName = data.type === 'plugin' ? 'plugin.json' : (data.type === 'theme' ? 'theme.json' : 'main.json');
+                                const pJson = files.find(f => f.name.endsWith(metaName));
+                                if (pJson) rootFolder = pJson.name.substring(0, pJson.name.length - metaName.length);
+                                let basePath = data.type === 'plugin' ? 'plugins' : (data.type === 'theme' ? 'themes' : 'icon-packs');
+                                
+                                const preparedFiles = {};
+                                let i = 0;
+                                for (let zf of files) {
+                                    if (zf.dir) continue;
+                                    if (zf.name.startsWith(rootFolder)) {
+                                        const relPath = zf.name.substring(rootFolder.length);
+                                        const fullPath = `${basePath}/${data.item_id}/${relPath}`;
+                                        const ext = zf.name.split('.').pop().toLowerCase();
+                                        const isBin = ['png','jpg','jpeg','gif','webp','ico','mp4','webm','mp3','wav','ogg','zip','wasm','woff','woff2','ttf','otf','eot'].includes(ext);
+                                        
+                                        if (isBin) {
+                                            preparedFiles[fullPath] = await zf.async('blob');
+                                        } else {
+                                            preparedFiles[fullPath] = await zf.async('string');
+                                        }
+                                    }
+                                    i++;
+                                    pBar.style.width = ((i / files.length) * 100) + '%';
+                                }
+                                
+                                pendingActions.push({ type: 'install', name: data.name, itemType: data.type, itemId: data.item_id, files: preparedFiles });
+                                renderUI();
+                                
+                            } catch(err) {
+                                const errBtn = h('button', { class: 'fx-btn', disabled: true }, 'Failed');
+                                pBarContainer.parentNode.replaceChild(errBtn, pBarContainer);
+                                fluxide.ide?.log('Failed to prepare package.', 'error');
+                            }
                         }
                     }, isInstalled || isDisabled ? 'Installed' : (queuedInstall ? 'Queued (Install)' : 'Install'));
 
@@ -278,46 +317,58 @@ fluxide.register({
                                 const pBarContainer = h('div', { style: { width: '100%', height: '4px', background: 'var(--surface-high)', borderRadius: '2px', overflow: 'hidden', margin: '20px 0 10px 0' } });
                                 const pBar = h('div', { style: { width: '0%', height: '100%', background: 'var(--accent)', transition: 'width 0.1s linear' } });
                                 pBarContainer.appendChild(pBar);
-                                const pText = h('div', { style: { fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-code)' } }, 'Extracting...');
 
                                 fluxide.ui.modal(win => {
                                     win.appendChild(h('div', { class: 'fx-modal-body', style: { textAlign: 'center', padding: '40px', color: 'var(--text)' } }, [
-                                        h('h3', { style: { marginTop: 0, marginBottom: '10px' } }, 'Installing Package...'),
+                                        h('h3', { style: { marginTop: 0, marginBottom: '10px' } }, 'Preparing Package...'),
                                         pBarContainer,
-                                        pText
+                                        h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, 'Extracting contents to memory.')
                                     ]));
                                 });
 
                                 try {
-                                    const zip = await JSZip.loadAsync(file);
+                                    const zip = await window.JSZip.loadAsync(file);
                                     const files = Object.values(zip.files);
                                     const pJson = files.find(f => f.name.endsWith('plugin.json') || f.name.endsWith('theme.json') || f.name.endsWith('main.json'));
+                                    
                                     if (pJson) {
                                         const metaName = pJson.name.split('/').pop();
                                         const metaContent = await pJson.async('string');
                                         const metaData = JSON.parse(metaContent);
                                         const itemId = metaData.id || metaData.name.toLowerCase().replace(/\s+/g, '_');
                                         const rootFolder = pJson.name.substring(0, pJson.name.length - metaName.length);
-                                        const typeFolder = metaName === 'plugin.json' ? 'plugins' : (metaName === 'theme.json' ? 'themes' : 'icon-packs');
+                                        const typeFolder = metaName === 'plugin.json' ? 'plugin' : (metaName === 'theme.json' ? 'theme' : 'icon_pack');
                                         
+                                        const preparedFiles = {};
                                         let i = 0;
                                         for (let zf of files) {
                                             if (zf.dir) continue;
                                             if (zf.name.startsWith(rootFolder)) {
                                                 const relPath = zf.name.substring(rootFolder.length);
-                                                const content = await zf.async('string');
-                                                await fs.write(`${typeFolder}/${itemId}/${relPath}`, content);
+                                                const fullPath = `${typeFolder === 'plugin' ? 'plugins' : (typeFolder === 'theme' ? 'themes' : 'icon-packs')}/${itemId}/${relPath}`;
+                                                const ext = zf.name.split('.').pop().toLowerCase();
+                                                const isBin = ['png','jpg','jpeg','gif','webp','ico','mp4','webm','mp3','wav','ogg','zip','wasm','woff','woff2','ttf','otf','eot'].includes(ext);
+                                                
+                                                if (isBin) {
+                                                    preparedFiles[fullPath] = await zf.async('blob');
+                                                } else {
+                                                    preparedFiles[fullPath] = await zf.async('string');
+                                                }
                                             }
                                             i++;
                                             pBar.style.width = ((i / files.length) * 100) + '%';
                                         }
-                                        pText.innerText = 'Reloading...';
-                                        setTimeout(() => location.reload(), 500);
+                                        
+                                        pendingActions.push({ type: 'install', name: metaData.name || itemId, itemType: typeFolder, itemId: itemId, files: preparedFiles });
+                                        fluxide.ui.modal.close();
+                                        renderUI();
                                     } else {
                                         fluxide.ui.modal.close();
+                                        fluxide.ide?.log('Invalid zip (missing meta file)', 'error');
                                     }
                                 } catch(err) {
                                     fluxide.ui.modal.close();
+                                    fluxide.ide?.log('Failed to extract ZIP', 'error');
                                 }
                             }
                         }
@@ -353,7 +404,6 @@ fluxide.register({
                                     const existingIdx = pendingActions.findIndex(a => (a.type === 'disable' || a.type === 'enable') && a.path === ext.path);
                                     if (existingIdx > -1) pendingActions.splice(existingIdx, 1);
                                     else pendingActions.push({ type: actionType, path: ext.path, itemType: ext.type, itemId: ext.id, name: ext.name });
-                                    fluxide.settings.requestReload();
                                     renderUI();
                                 }}, isQueuedToggle ? 'Queued' : (ext.disabled ? 'Enable' : 'Disable')),
                                 h('button', { class: 'fx-btn', style: { padding: '6px 12px' }, disabled: isQueuedDel, onClick: async () => {
@@ -371,7 +421,6 @@ fluxide.register({
                                 h('button', { class: 'fx-btn', disabled: isQueuedDel, style: { padding: '6px 12px', color: isQueuedDel ? 'var(--text-dim)' : 'var(--danger)', borderColor: isQueuedDel ? 'var(--border)' : 'var(--danger-border)' }, onClick: () => {
                                     if (ext.id === 'manager' || ext.id === 'ide') return;
                                     pendingActions.push({ type: 'delete', path: ext.path, name: ext.name });
-                                    fluxide.settings.requestReload();
                                     renderUI();
                                 }}, isQueuedDel ? 'Queued' : 'Uninstall')
                             ])
