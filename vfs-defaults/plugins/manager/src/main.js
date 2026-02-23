@@ -1,374 +1,455 @@
 const { h } = fluxide.ui;
-const { state, fs, theme } = fluxide;
-const API_BASE = "http://darksoulq.pythonanywhere.com";
-
-const Manager = {
-    _container: null,
-    items: [],
-    loading: true,
-    searchQuery: '',
-    activeItem: null,
-    itemTab: 'details',
-    itemData: null,
-    needsReload: false,
-
-    async init() {
-        if (!document.getElementById('manager-styles')) {
-            const style = document.createElement('style');
-            style.id = 'manager-styles';
-            style.innerHTML = `
-                .mgr-btn { background: var(--surface-high); border: 1px solid transparent; color: var(--text); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--font); transition: 0.2s; }
-                .mgr-btn:hover { background: var(--surface-hover); }
-                .mgr-btn-primary { background: var(--accent); color: #fff; }
-                .mgr-btn-danger { color: var(--danger); border-color: var(--danger-border); background: transparent; }
-                .mgr-btn-warning { color: #fbbf24; border-color: #fbbf24; background: transparent; }
-                .mgr-input { background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 10px 14px; border-radius: 6px; font-family: var(--font); font-size: 14px; width: 100%; box-sizing: border-box; }
-                .mgr-input:focus { outline: none; border-color: var(--accent); }
-                .mgr-card { background: var(--surface-low); border: 1px solid var(--border); border-radius: 8px; padding: 16px; display: flex; flex-direction: column; transition: transform 0.2s; }
-                .mgr-card:hover { transform: translateY(-2px); border-color: var(--surface-high); cursor: pointer; }
-                .mgr-badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; background: var(--surface-high); color: var(--text-dim); }
-                .mgr-badge-success { background: rgba(16, 185, 129, 0.1); color: #10b981; border: 1px solid #10b981; }
-                .mgr-badge-warning { background: rgba(251, 191, 36, 0.1); color: #fbbf24; border: 1px solid #fbbf24; }
-                .mgr-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--surface-high); margin-bottom: 24px; }
-                .mgr-tab { background: transparent; border: none; padding: 12px 0; color: var(--text-dim); font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-                .mgr-tab.active { color: var(--text); border-color: var(--accent); }
-                .mgr-md { color: var(--text-dim); font-size: 14px; line-height: 1.6; }
-                .mgr-md h1, .mgr-md h2, .mgr-md h3 { color: var(--text); margin-top: 0; }
-                .mgr-md pre { background: var(--surface-high); padding: 16px; border-radius: 6px; overflow: auto; border: 1px solid var(--border); }
-                .mgr-md code { font-family: var(--font-code); font-size: 13px; }
-                .mgr-doc-section { margin-bottom: 24px; }
-                .mgr-doc-head { font-size: 16px; font-weight: 700; color: var(--text); margin: 0 0 12px 0; border-bottom: 1px solid var(--surface-high); padding-bottom: 8px; }
-                .mgr-doc-page { border: 1px solid var(--border); border-radius: 6px; margin-bottom: 8px; background: var(--bg); overflow: hidden; }
-                .mgr-doc-page-title { padding: 12px 16px; font-weight: 600; cursor: pointer; color: var(--text); display: flex; justify-content: space-between; user-select: none; }
-                .mgr-doc-page-title:hover { background: var(--surface-high); }
-                .mgr-doc-page-content { padding: 16px; border-top: 1px solid var(--border); display: none; }
-            `;
-            document.head.appendChild(style);
-        }
-        this.fetchItems();
-    },
-
-    async fetchItems() {
-        this.loading = true;
-        this.render();
-        try {
-            const res = await fetch(`${API_BASE}/api/items`);
-            const data = await res.json();
-            this.items = data.items || [];
-        } catch(e) {}
-        this.loading = false;
-        this.render();
-    },
-
-    async fetchItemData(id) {
-        try {
-            const res = await fetch(`${API_BASE}/api/items/${id}`);
-            this.itemData = await res.json();
-        } catch(e) {}
-        this.render();
-    },
-
-    getBaseDir(type, itemId) {
-        if (type === 'theme') return `themes/${itemId}`;
-        if (type === 'icon_pack') return `icon-packs/${itemId}`;
-        return `plugins/${itemId}`;
-    },
-
-    getDisabledDir(type, itemId) {
-        return `disabled/${itemId}`;
-    },
-
-    isInstalled(type, itemId) {
-        const p = this.getBaseDir(type, itemId);
-        return state.get().vfs[`${p}/plugin.json`] || state.get().vfs[`${p}/theme.json`] || state.get().vfs[`${p}/main.json`];
-    },
-
-    isDisabled(type, itemId) {
-        const p = this.getDisabledDir(type, itemId);
-        return state.get().vfs[`${p}/plugin.json`] || state.get().vfs[`${p}/theme.json`] || state.get().vfs[`${p}/main.json`];
-    },
-
-    async install(item, versionId) {
-        const btnId = `mgr-install-${item.id}`;
-        const btn = document.getElementById(btnId);
-        if (btn) btn.innerText = 'Installing...';
-        
-        try {
-            const res = await fetch(`${API_BASE}/api/versions/${versionId}/extract`);
-            const data = await res.json();
-            if (data.error) throw new Error(data.error);
-            
-            const base = this.getBaseDir(item.type, item.item_id);
-            for (const [path, fileData] of Object.entries(data.files)) {
-                const fullPath = `${base}/${path}`;
-                if (fileData.binary) {
-                    const binStr = atob(fileData.data);
-                    const len = binStr.length;
-                    const bytes = new Uint8Array(len);
-                    for (let i = 0; i < len; i++) bytes[i] = binStr.charCodeAt(i);
-                    const ext = path.split('.').pop();
-                    const blob = new Blob([bytes], { type: `application/${ext}` });
-                    state.get().vfs[fullPath] = blob;
-                    await fs.write(fullPath, blob);
-                } else {
-                    state.get().vfs[fullPath] = fileData.data;
-                    await fs.write(fullPath, fileData.data);
-                }
-            }
-            this.needsReload = true;
-            if(fluxide.ide) fluxide.ide.log(`Installed ${item.name}`, 'success');
-        } catch(e) {}
-        this.render();
-        fluxide.requireReload();
-    },
-
-    async uninstall(item) {
-        const base = this.getBaseDir(item.type, item.item_id);
-        const dis = this.getDisabledDir(item.type, item.item_id);
-        
-        for (const p of [base, dis]) {
-            Object.keys(state.get().vfs).forEach(k => {
-                if (k.startsWith(`${p}/`)) delete state.get().vfs[k];
-            });
-            await fs.remove(p);
-        }
-        this.needsReload = true;
-        if(fluxide.ide) fluxide.ide.log(`Uninstalled ${item.name}`, 'info');
-        this.render();
-        fluxide.requireReload();
-    },
-
-    async toggleDisable(item) {
-        const isDis = this.isDisabled(item.type, item.item_id);
-        const source = isDis ? this.getDisabledDir(item.type, item.item_id) : this.getBaseDir(item.type, item.item_id);
-        const target = isDis ? this.getBaseDir(item.type, item.item_id) : this.getDisabledDir(item.type, item.item_id);
-        
-        const pathsToMove = Object.keys(state.get().vfs).filter(k => k.startsWith(`${source}/`));
-        for (const p of pathsToMove) {
-            const newPath = p.replace(`${source}/`, `${target}/`);
-            state.get().vfs[newPath] = state.get().vfs[p];
-            await fs.write(newPath, state.get().vfs[p]);
-            delete state.get().vfs[p];
-        }
-        await fs.remove(source);
-        
-        this.needsReload = true;
-        if(fluxide.ide) fluxide.ide.log(`${item.name} ${isDis ? 'enabled' : 'disabled'}`, 'info');
-        this.render();
-        fluxide.requireReload();
-    },
-
-    renderGrid() {
-        if (this.loading) return h('div', { style: { color: 'var(--text-dim)' } }, 'Loading marketplace...');
-
-        const q = this.searchQuery.toLowerCase();
-        const filtered = this.items.filter(i => 
-            i.name.toLowerCase().includes(q) || 
-            i.author.toLowerCase().includes(q) ||
-            i.type.toLowerCase().includes(q)
-        );
-
-        if (filtered.length === 0) return h('div', { style: { color: 'var(--text-dim)', textAlign: 'center', padding: '40px' } }, 'No extensions found.');
-
-        const cards = filtered.map(item => {
-            const installed = this.isInstalled(item.type, item.item_id);
-            const disabled = this.isDisabled(item.type, item.item_id);
-            
-            const badges = [];
-            if (installed) badges.push(h('span', { class: 'mgr-badge mgr-badge-success' }, 'Installed'));
-            if (disabled) badges.push(h('span', { class: 'mgr-badge mgr-badge-warning' }, 'Disabled'));
-
-            const card = h('div', { class: 'mgr-card' }, [
-                h('div', { style: { display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' } }, [
-                    h('div', { style: { width: '48px', height: '48px', borderRadius: '50%', background: 'var(--surface-high)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: 800, border: '1px solid var(--border)' } }, item.name.substring(0,2).toUpperCase()),
-                    h('div', { style: { flex: 1, minWidth: 0 } }, [
-                        h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
-                            h('h3', { style: { margin: 0, fontSize: '16px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, item.name),
-                            ...badges
-                        ]),
-                        h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, `by ${item.author}`)
-                    ])
-                ]),
-                h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' } }, [
-                    h('span', { class: 'mgr-badge' }, item.type.replace('_', ' ')),
-                    h('div', { style: { display: 'flex', gap: '12px', alignItems: 'center' } }, [
-                        h('span', { style: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-dim)' } }, [
-                            h('span', { style: { color: 'var(--accent)' }, innerHTML: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path></svg>' }),
-                            item.upvotes || 0
-                        ]),
-                        h('span', { style: { fontSize: '12px', color: 'var(--text-dark)', fontFamily: 'var(--font-code)' } }, `v${item.version}`)
-                    ])
-                ])
-            ]);
-            
-            card.onclick = () => {
-                this.activeItem = item;
-                this.itemTab = 'details';
-                this.itemData = null;
-                this.fetchItemData(item.id);
-                this.render();
-            };
-            return card;
-        });
-
-        return h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' } }, cards);
-    },
-
-    renderItemView() {
-        if (!this.activeItem) return h('div');
-        const i = this.activeItem;
-        const d = this.itemData;
-
-        const installed = this.isInstalled(i.type, i.item_id);
-        const disabled = this.isDisabled(i.type, i.item_id);
-        
-        const actions = [];
-        if (this.needsReload && (installed || disabled)) {
-            actions.push(h('button', { class: 'mgr-btn mgr-btn-warning', onClick: () => fluxide.requireReload() }, 'Reload Required'));
-        } else if (installed || disabled) {
-            actions.push(h('button', { class: 'mgr-btn', onClick: () => this.toggleDisable(i) }, disabled ? 'Enable' : 'Disable'));
-            actions.push(h('button', { class: 'mgr-btn mgr-btn-danger', onClick: () => this.uninstall(i) }, 'Uninstall'));
-        } else {
-            actions.push(h('button', { id: `mgr-install-${i.id}`, class: 'mgr-btn mgr-btn-primary', onClick: () => {
-                if (d && d.versions && d.versions.length > 0) this.install(i, d.versions[0].id);
-            }}, 'Install'));
-        }
-
-        const head = h('div', { style: { display: 'flex', gap: '24px', alignItems: 'center', marginBottom: '32px', paddingBottom: '32px', borderBottom: '1px solid var(--surface-high)' } }, [
-            h('button', { class: 'mgr-btn', style: { padding: '8px 12px' }, onClick: () => { this.activeItem = null; this.render(); } }, '←'),
-            h('div', { style: { width: '64px', height: '64px', borderRadius: '50%', background: 'var(--surface-high)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '28px', fontWeight: 800, border: '1px solid var(--border)' } }, i.name.substring(0,2).toUpperCase()),
-            h('div', { style: { flex: 1 } }, [
-                h('div', { style: { display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '4px' } }, [
-                    h('h1', { style: { margin: 0, fontSize: '24px', color: 'var(--text)' } }, i.name),
-                    h('span', { class: 'mgr-badge' }, i.type.replace('_', ' '))
-                ]),
-                h('div', { style: { color: 'var(--text-dim)', fontSize: '14px' } }, `by ${i.author} • ID: ${i.item_id}`)
-            ]),
-            h('div', { style: { display: 'flex', gap: '8px' } }, actions)
-        ]);
-
-        const tabsArray = [
-            { id: 'details', label: 'Details' },
-            { id: 'gallery', label: 'Gallery' },
-            { id: 'versions', label: 'Versions' },
-            { id: 'docs', label: 'Documentation' },
-            { id: 'reviews', label: 'Reviews' }
-        ];
-
-        const tabsRow = h('div', { class: 'mgr-tabs' }, tabsArray.map(t => 
-            h('button', { class: `mgr-tab ${this.itemTab === t.id ? 'active' : ''}`, onClick: () => { this.itemTab = t.id; this.render(); } }, t.label)
-        ));
-
-        let content = h('div', { style: { color: 'var(--text-dim)' } }, 'Loading data...');
-        if (d) {
-            if (this.itemTab === 'details') {
-                const linksObj = JSON.parse(d.links_json || '{}');
-                const linksHtml = Object.keys(linksObj).length > 0 ? Object.entries(linksObj).map(([k,v]) => h('a', { href: v, target: '_blank', style: { color: 'var(--accent)', display: 'block', marginBottom: '8px' } }, k)) : [h('div', { style: { color: 'var(--text-dim)' } }, 'No links.')];
-                
-                content = h('div', { style: { display: 'flex', gap: '32px', alignItems: 'flex-start' } }, [
-                    h('div', { class: 'mgr-md', style: { flex: 3 }, innerHTML: fluxide.ui.markdown(d.description_md || '*No description provided.*') }),
-                    h('div', { style: { flex: 1, background: 'var(--surface-low)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border)' } }, [
-                        h('h4', { style: { margin: '0 0 16px 0', color: 'var(--text)' } }, 'Links'),
-                        ...linksHtml
-                    ])
-                ]);
-            } else if (this.itemTab === 'gallery') {
-                const imgs = JSON.parse(d.gallery_json || '[]');
-                if (imgs.length === 0) content = h('div', { style: { color: 'var(--text-dim)' } }, 'No gallery images.');
-                else content = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' } }, imgs.map(url => h('img', { src: url, style: { width: '100%', borderRadius: '8px', border: '1px solid var(--border)' } })));
-            } else if (this.itemTab === 'versions') {
-                content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, d.versions.map(v => 
-                    h('div', { style: { background: 'var(--surface-low)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' } }, [
-                        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' } }, [
-                            h('div', {}, [
-                                h('h3', { style: { margin: '0 0 4px 0', color: 'var(--text)', fontSize: '16px' } }, `v${v.version}`),
-                                h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, v.created_at.substring(0, 10))
-                            ]),
-                            h('div', { style: { display: 'flex', gap: '8px' } }, [
-                                v.changelog ? h('button', { class: 'mgr-btn', onClick: () => {
-                                    fluxide.ui.modal(win => {
-                                        win.appendChild(h('div', { class: 'fx-modal-body', style: { padding: '24px' } }, [
-                                            h('h3', { style: { marginTop: 0, color: 'var(--text)' } }, `Changelog v${v.version}`),
-                                            h('div', { class: 'mgr-md', innerHTML: fluxide.ui.markdown(v.changelog) }),
-                                            h('div', { style: { marginTop: '20px', textAlign: 'right' } }, [
-                                                h('button', { class: 'mgr-btn mgr-btn-primary', onClick: () => fluxide.ui.modal.close() }, 'Close')
-                                            ])
-                                        ]));
-                                    });
-                                }}, 'Changelog') : h('span', {}),
-                                installed ? h('button', { class: 'mgr-btn', onClick: () => this.install(i, v.id) }, 'Reinstall') : h('span', {})
-                            ])
-                        ])
-                    ])
-                ));
-            } else if (this.itemTab === 'docs') {
-                if (!d.docs || Object.keys(d.docs).length === 0) {
-                    content = h('div', { style: { color: 'var(--text-dim)' } }, 'No documentation bundled.');
-                } else {
-                    let idx = { sections: [] };
-                    try { idx = JSON.parse(d.docs['docs/index.json'] || '{}'); } catch(e){}
-                    const secs = idx.sections || [];
-                    content = h('div', {}, secs.map(sec => h('div', { class: 'mgr-doc-section' }, [
-                        h('h3', { class: 'mgr-doc-head' }, sec.title),
-                        ...sec.pages.map(p => h('div', { class: 'mgr-doc-page' }, [
-                            h('div', { class: 'mgr-doc-page-title', onClick: (e) => {
-                                const body = e.currentTarget.nextElementSibling;
-                                body.style.display = body.style.display === 'block' ? 'none' : 'block';
-                            }}, [ h('span', {}, p.title), h('span', { style: { fontSize: '10px' } }, '▼') ]),
-                            h('div', { class: 'mgr-doc-page-content mgr-md', innerHTML: fluxide.ui.markdown(d.docs[`docs/${p.file}`] || '*Empty*') })
-                        ]))
-                    ])));
-                }
-            } else if (this.itemTab === 'reviews') {
-                if (!d.reviews || d.reviews.length === 0) {
-                    content = h('div', { style: { color: 'var(--text-dim)' } }, 'No reviews yet.');
-                } else {
-                    content = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, d.reviews.map(r => 
-                        h('div', { style: { background: 'var(--surface-low)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' } }, [
-                            h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px' } }, [
-                                h('span', { style: { fontWeight: 600, color: 'var(--text)' } }, r.username),
-                                h('span', { style: { color: '#fbbf24' } }, '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating))
-                            ]),
-                            h('div', { style: { color: 'var(--text-dim)', fontSize: '14px' } }, r.comment)
-                        ])
-                    ));
-                }
-            }
-        }
-
-        return h('div', { style: { display: 'flex', flexDirection: 'column', height: '100%' } }, [head, tabsRow, content]);
-    },
-
-    render(container = this._container) {
-        if (!container) return;
-        this._container = container;
-        container.innerHTML = '';
-        container.style.padding = '32px';
-        container.style.overflowY = 'auto';
-
-        if (this.activeItem) {
-            container.appendChild(this.renderItemView());
-        } else {
-            const head = h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' } }, [
-                h('h1', { style: { margin: 0, fontSize: '28px', color: 'var(--text)' } }, 'Marketplace'),
-                h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: '6px', padding: '6px 12px', width: '300px' } }, [
-                    h('span', { style: { color: 'var(--text-dim)' }, innerHTML: theme.getIcon('search') }),
-                    h('input', { 
-                        class: 'mgr-input', placeholder: 'Search...', value: this.searchQuery, 
-                        style: { border: 'none', padding: 0, background: 'transparent' },
-                        onInput: (e) => { this.searchQuery = e.target.value; this.render(); }
-                    })
-                ])
-            ]);
-
-            container.appendChild(h('div', { style: { display: 'flex', flexDirection: 'column' } }, [head, this.renderGrid()]));
-        }
-    }
-};
+const { state, on, expose, fs, theme } = fluxide;
 
 fluxide.register({
     id: 'manager',
-    view: { id: 'manager', label: 'Market', nav: true, order: 2 },
-    init() { Manager.init(); },
-    render: (c) => Manager.render(c)
+    init() {
+        fluxide.settings.register('extra.manager', {
+            label: 'Extension Manager'
+        });
+
+        let pendingActions = [];
+        let viewingItem = null;
+        let activeTab = 'installed';
+        let marketItems = [];
+        let loadingMarket = false;
+        let marketSearch = '';
+        let detailsTab = 'details';
+
+        on('settings:apply', async () => {
+            if (pendingActions.length === 0) return;
+
+            fluxide.ui.modal(win => {
+                win.innerHTML = '';
+                const pText = h('div', { style: { marginBottom: '16px', color: 'var(--text)', fontSize: '15px', fontWeight: 600 } }, 'Applying changes...');
+                const pBar = h('div', { style: { width: '0%', height: '100%', background: 'var(--accent)', transition: 'width 0.2s' } });
+                
+                win.appendChild(h('div', { class: 'fx-modal-body', style: { padding: '40px', textAlign: 'center' } }, [
+                    pText,
+                    h('div', { style: { height: '6px', width: '100%', background: 'var(--surface-high)', borderRadius: '3px', overflow: 'hidden' } }, [pBar])
+                ]));
+
+                (async () => {
+                    for (let i = 0; i < pendingActions.length; i++) {
+                        const action = pendingActions[i];
+                        pText.innerText = `Processing ${action.name || action.path}...`;
+                        pBar.style.width = ((i / pendingActions.length) * 100) + '%';
+                        
+                        if (action.type === 'delete') {
+                            const pathsToDel = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
+                            for (const p of pathsToDel) {
+                                delete state.get().vfs[p];
+                                await fs.remove(p);
+                            }
+                            await fs.remove(action.path);
+                        } else if (action.type === 'install') {
+                            try {
+                                const res = await fetch(`https://darksoulq.pythonanywhere.com/api/versions/${action.vid}/extract`);
+                                const data = await res.json();
+                                if (data.files) {
+                                    const baseDir = action.itemType === 'plugin' ? 'plugins' : (action.itemType === 'theme' ? 'themes' : 'icon-packs');
+                                    const basePath = `${baseDir}/${action.itemId}`;
+                                    for (const [path, fileData] of Object.entries(data.files)) {
+                                        const fullPath = `${basePath}/${path}`;
+                                        if (fileData.binary) {
+                                            const binStr = atob(fileData.data);
+                                            const len = binStr.length;
+                                            const bytes = new Uint8Array(len);
+                                            for (let j = 0; j < len; j++) bytes[j] = binStr.charCodeAt(j);
+                                            const ext = path.split('.').pop();
+                                            const blob = new Blob([bytes], { type: `application/${ext}` });
+                                            state.get().vfs[fullPath] = blob;
+                                            await fs.write(fullPath, blob);
+                                        } else {
+                                            state.get().vfs[fullPath] = fileData.data;
+                                            await fs.write(fullPath, fileData.data);
+                                        }
+                                    }
+                                }
+                            } catch(e) {}
+                        } else if (action.type === 'disable' || action.type === 'enable') {
+                            const targetBase = action.type === 'disable' ? 'disabled' : (action.itemType === 'plugin' ? 'plugins' : (action.itemType === 'theme' ? 'themes' : 'icon-packs'));
+                            const targetPath = `${targetBase}/${action.itemId}`;
+                            const pathsToMove = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
+                            for (const p of pathsToMove) {
+                                const newPath = p.replace(action.path, targetPath);
+                                state.get().vfs[newPath] = state.get().vfs[p];
+                                await fs.write(newPath, state.get().vfs[p]);
+                                delete state.get().vfs[p];
+                                await fs.remove(p);
+                            }
+                            await fs.remove(action.path);
+                        }
+                    }
+                    pBar.style.width = '100%';
+                    pText.innerText = 'Reloading IDE...';
+                    setTimeout(() => location.reload(), 500);
+                })();
+            });
+            pendingActions = [];
+        });
+
+        on('settings:cancel', () => { pendingActions = []; });
+
+        on('settings:render:extra.manager', ({container}) => {
+            const renderUI = async () => {
+                container.innerHTML = '';
+                container.style.display = 'flex';
+                container.style.flexDirection = 'column';
+                container.style.height = '100%';
+                
+                const header = h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexShrink: 0 } }, [
+                    h('h2', { style: { margin: 0, fontSize: '24px', color: 'var(--text)' } }, viewingItem ? viewingItem.name : 'Extension Manager'),
+                    !viewingItem ? h('div', { style: { display: 'flex', gap: '8px', background: 'var(--surface)', padding: '6px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' } }, [
+                        h('button', { class: 'fx-btn' + (activeTab === 'installed' ? ' fx-btn-primary' : ''), style: { border: 'none', background: activeTab === 'installed' ? 'var(--accent)' : 'transparent', color: activeTab === 'installed' ? '#fff' : 'var(--text-dim)', padding: '8px 16px' }, onClick: () => { activeTab = 'installed'; renderUI(); } }, 'Installed'),
+                        h('button', { class: 'fx-btn' + (activeTab === 'market' ? ' fx-btn-primary' : ''), style: { border: 'none', background: activeTab === 'market' ? 'var(--accent)' : 'transparent', color: activeTab === 'market' ? '#fff' : 'var(--text-dim)', padding: '8px 16px' }, onClick: () => { activeTab = 'market'; renderUI(); } }, 'Marketplace')
+                    ]) : h('button', { class: 'fx-btn', style: { padding: '8px 16px' }, onClick: () => { viewingItem = null; renderUI(); } }, 'Back to Results')
+                ]);
+                
+                container.appendChild(header);
+
+                const contentArea = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', flex: 1, paddingRight: '10px', paddingBottom: '20px' } });
+                container.appendChild(contentArea);
+
+                if (viewingItem && activeTab === 'market') {
+                    if (!viewingItem._fetched) {
+                        contentArea.innerHTML = '<div style="color: var(--text-dim); padding: 40px; text-align: center;">Loading details...</div>';
+                        try {
+                            const res = await fetch(`https://darksoulq.pythonanywhere.com/api/items/${viewingItem.id}`);
+                            const data = await res.json();
+                            Object.assign(viewingItem, data);
+                            viewingItem._fetched = true;
+                        } catch(e) {}
+                        renderUI();
+                        return;
+                    }
+                    
+                    const data = viewingItem;
+                    const vfsPaths = Object.keys(state.get().vfs);
+                    const isInstalled = vfsPaths.some(p => p.startsWith(`plugins/${data.item_id}/`) || p.startsWith(`themes/${data.item_id}/`) || p.startsWith(`icon-packs/${data.item_id}/`));
+                    const isDisabled = vfsPaths.some(p => p.startsWith(`disabled/${data.item_id}/`));
+                    
+                    const queuedInstall = pendingActions.find(a => a.type === 'install' && a.itemId === data.item_id);
+
+                    const actionBtn = h('button', {
+                        class: 'fx-btn' + (isInstalled || isDisabled || queuedInstall ? '' : ' fx-btn-primary'),
+                        style: { padding: '10px 24px', fontSize: '14px' },
+                        disabled: isInstalled || isDisabled || queuedInstall,
+                        onClick: () => {
+                            const vid = document.getElementById('version-select').value;
+                            pendingActions.push({ type: 'install', vid, name: data.name, itemType: data.type, itemId: data.item_id });
+                            fluxide.settings.requestReload();
+                            renderUI();
+                        }
+                    }, isInstalled || isDisabled ? 'Installed' : (queuedInstall ? 'Queued (Install)' : 'Install'));
+
+                    const installCard = h('div', { style: { background: 'var(--surface-low)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '32px', marginBottom: '24px' } }, [
+                        h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' } }, [
+                            h('div', { style: { display: 'flex', gap: '20px', alignItems: 'center' } }, [
+                                h('div', { style: { width: '80px', height: '80px', fontSize: '32px', borderRadius: '16px', background: 'var(--surface-high)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text)', flexShrink: 0 } }, data.name.substring(0,1).toUpperCase()),
+                                h('div', {}, [
+                                    h('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' } }, [
+                                        h('h3', { style: { margin: 0, fontSize: '24px', color: 'var(--text)' } }, data.name),
+                                        h('span', { class: `badge badge-${data.type}`, style: { padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', background: 'var(--surface-high)', color: 'var(--text-dim)' } }, data.type.replace('_', ' '))
+                                    ]),
+                                    h('div', { style: { fontSize: '14px', color: 'var(--text-dim)' } }, `By ${data.author}`)
+                                ])
+                            ]),
+                            h('div', { style: { display: 'flex', gap: '12px', alignItems: 'center' } }, [
+                                h('select', { id: 'version-select', class: 'fx-select', style: { width: '140px', marginBottom: 0 } }, 
+                                    (data.versions || []).map(v => h('option', { value: v.id }, `v${v.version}`))
+                                ),
+                                actionBtn
+                            ])
+                        ])
+                    ]);
+                    
+                    const tabBtn = (id, label) => h('button', {
+                        style: { background: 'transparent', border: 'none', padding: '12px 16px', color: detailsTab === id ? 'var(--text)' : 'var(--text-dim)', borderBottom: detailsTab === id ? '2px solid var(--accent)' : '2px solid transparent', cursor: 'pointer', fontSize: '14px', fontWeight: 600, transition: '0.2s' },
+                        onClick: () => { detailsTab = id; renderUI(); }
+                    }, label);
+
+                    const tabsHeader = h('div', { style: { display: 'flex', borderBottom: '1px solid var(--surface-high)', marginBottom: '24px' } }, [
+                        tabBtn('details', 'Details'),
+                        tabBtn('gallery', 'Gallery'),
+                        tabBtn('versions', 'Versions'),
+                        tabBtn('docs', 'Documentation'),
+                        tabBtn('reviews', 'Reviews')
+                    ]);
+
+                    let tabContent = h('div');
+                    
+                    if (detailsTab === 'details') {
+                        let linksHtml = [];
+                        try {
+                            const linksObj = JSON.parse(data.links_json || '{}');
+                            linksHtml = Object.entries(linksObj).map(([k,v]) => h('a', { href: v, target: '_blank', style: { display: 'block', color: 'var(--accent)', textDecoration: 'none', marginBottom: '8px' } }, k));
+                        } catch(e){}
+
+                        tabContent = h('div', { style: { display: 'flex', gap: '32px' } }, [
+                            h('div', { style: { flex: 3, color: 'var(--text)', lineHeight: '1.6', fontSize: '14px' }, innerHTML: fluxide.ui.markdown(data.description_md || '*No description.*') }),
+                            h('div', { style: { flex: 1, background: 'var(--surface-low)', padding: '20px', borderRadius: '8px', border: '1px solid var(--border)', alignSelf: 'flex-start' } }, [
+                                h('h4', { style: { margin: '0 0 16px 0', color: 'var(--text)' } }, 'Links'),
+                                ...linksHtml
+                            ])
+                        ]);
+                    } else if (detailsTab === 'gallery') {
+                        let imgs = [];
+                        try { imgs = JSON.parse(data.gallery_json || '[]'); } catch(e){}
+                        if (imgs.length === 0) tabContent = h('div', { style: { color: 'var(--text-dim)' } }, 'No gallery images.');
+                        else tabContent = h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' } }, imgs.map(url => h('img', { src: url, style: { width: '100%', borderRadius: '8px', border: '1px solid var(--border)' } })));
+                    } else if (detailsTab === 'versions') {
+                        tabContent = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } }, (data.versions||[]).map(v => 
+                            h('div', { style: { background: 'var(--surface-low)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' } }, [
+                                h('h3', { style: { margin: '0 0 4px 0', color: 'var(--text)', fontSize: '16px' } }, `v${v.version}`),
+                                h('div', { style: { fontSize: '12px', color: 'var(--text-dim)', marginBottom: v.changelog ? '12px' : '0' } }, v.created_at.substring(0, 10)),
+                                v.changelog ? h('div', { style: { background: 'var(--bg)', padding: '12px', borderRadius: '6px', fontSize: '13px', color: 'var(--text-dim)' }, innerHTML: fluxide.ui.markdown(v.changelog) }) : h('span')
+                            ])
+                        ));
+                    } else if (detailsTab === 'docs') {
+                        if (!data.docs || Object.keys(data.docs).length === 0) {
+                            tabContent = h('div', { style: { color: 'var(--text-dim)' } }, 'No documentation bundled.');
+                        } else {
+                            let idx = { sections: [] };
+                            try { idx = JSON.parse(data.docs['docs/index.json'] || '{}'); } catch(e){}
+                            tabContent = h('div', {}, (idx.sections || []).map(sec => h('div', { style: { marginBottom: '24px' } }, [
+                                h('h3', { style: { fontSize: '16px', color: 'var(--text)', borderBottom: '1px solid var(--surface-high)', paddingBottom: '8px', marginBottom: '12px' } }, sec.title),
+                                ...sec.pages.map(p => h('div', { style: { border: '1px solid var(--border)', borderRadius: '6px', marginBottom: '8px', background: 'var(--bg)' } }, [
+                                    h('div', { style: { padding: '12px 16px', fontWeight: 600, cursor: 'pointer', color: 'var(--text)', userSelect: 'none' }, onClick: (e) => {
+                                        const body = e.currentTarget.nextElementSibling;
+                                        body.style.display = body.style.display === 'block' ? 'none' : 'block';
+                                    }}, p.title),
+                                    h('div', { style: { padding: '16px', borderTop: '1px solid var(--border)', display: 'none', color: 'var(--text-dim)', fontSize: '14px', lineHeight: '1.6' }, innerHTML: fluxide.ui.markdown(data.docs[`docs/${p.file}`] || '*Empty*') })
+                                ]))
+                            ])));
+                        }
+                    } else if (detailsTab === 'reviews') {
+                        tabContent = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } }, (data.reviews||[]).map(r => 
+                            h('div', { style: { background: 'var(--surface-low)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border)' } }, [
+                                h('div', { style: { display: 'flex', justifyContent: 'space-between', marginBottom: '8px' } }, [
+                                    h('span', { style: { fontWeight: 600, color: 'var(--text)' } }, r.username),
+                                    h('span', { style: { color: '#fbbf24' } }, '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating))
+                                ]),
+                                h('div', { style: { color: 'var(--text-dim)', fontSize: '14px' } }, r.comment)
+                            ])
+                        ));
+                        if(data.reviews.length === 0) tabContent = h('div', { style: { color: 'var(--text-dim)' } }, 'No reviews yet.');
+                    }
+
+                    contentArea.appendChild(installCard);
+                    contentArea.appendChild(tabsHeader);
+                    contentArea.appendChild(tabContent);
+                    
+                } else if (activeTab === 'installed') {
+                    const vfs = state.get().vfs;
+                    const extensions = [];
+
+                    Object.keys(vfs).forEach(p => {
+                        const isDis = p.startsWith('disabled/');
+                        if ((p.startsWith('plugins/') || isDis) && p.endsWith('/plugin.json')) {
+                            try {
+                                const data = JSON.parse(vfs[p]);
+                                const dir = p.substring(0, p.lastIndexOf('/'));
+                                extensions.push({ type: 'plugin', path: dir, id: data.id || dir.split('/')[1], name: data.name || data.id, version: data.version || '1.0.0', author: data.author || 'Unknown', disabled: isDis });
+                            } catch(e) {}
+                        }
+                        if ((p.startsWith('themes/') || isDis) && p.endsWith('/theme.json')) {
+                            try {
+                                const data = JSON.parse(vfs[p]);
+                                const dir = p.substring(0, p.lastIndexOf('/'));
+                                extensions.push({ type: 'theme', path: dir, id: data.id || dir.split('/')[1], name: data.name || data.id, version: data.version || '1.0.0', author: data.author || 'Unknown', disabled: isDis });
+                            } catch(e) {}
+                        }
+                        if ((p.startsWith('icon-packs/') || isDis) && p.endsWith('/main.json')) {
+                            try {
+                                const data = JSON.parse(vfs[p]);
+                                const dir = p.substring(0, p.lastIndexOf('/'));
+                                extensions.push({ type: 'icon-pack', path: dir, id: data.id || dir.split('/')[1], name: data.name || data.id, version: data.version || '1.0.0', author: data.author || 'Unknown', disabled: isDis });
+                            } catch(e) {}
+                        }
+                    });
+
+                    const importInput = h('input', {
+                        type: 'file', accept: '.zip', style: { display: 'none' },
+                        onChange: async (e) => {
+                            const file = e.target.files[0];
+                            if(!file) return;
+                            if (file.name.endsWith('.zip')) {
+                                const pBarContainer = h('div', { style: { width: '100%', height: '4px', background: 'var(--surface-high)', borderRadius: '2px', overflow: 'hidden', margin: '20px 0 10px 0' } });
+                                const pBar = h('div', { style: { width: '0%', height: '100%', background: 'var(--accent)', transition: 'width 0.1s linear' } });
+                                pBarContainer.appendChild(pBar);
+                                const pText = h('div', { style: { fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-code)' } }, 'Extracting...');
+
+                                fluxide.ui.modal(win => {
+                                    win.appendChild(h('div', { class: 'fx-modal-body', style: { textAlign: 'center', padding: '40px', color: 'var(--text)' } }, [
+                                        h('h3', { style: { marginTop: 0, marginBottom: '10px' } }, 'Installing Package...'),
+                                        pBarContainer,
+                                        pText
+                                    ]));
+                                });
+
+                                try {
+                                    const zip = await JSZip.loadAsync(file);
+                                    const files = Object.values(zip.files);
+                                    const pJson = files.find(f => f.name.endsWith('plugin.json') || f.name.endsWith('theme.json') || f.name.endsWith('main.json'));
+                                    if (pJson) {
+                                        const metaName = pJson.name.split('/').pop();
+                                        const metaContent = await pJson.async('string');
+                                        const metaData = JSON.parse(metaContent);
+                                        const itemId = metaData.id || metaData.name.toLowerCase().replace(/\s+/g, '_');
+                                        const rootFolder = pJson.name.substring(0, pJson.name.length - metaName.length);
+                                        const typeFolder = metaName === 'plugin.json' ? 'plugins' : (metaName === 'theme.json' ? 'themes' : 'icon-packs');
+                                        
+                                        let i = 0;
+                                        for (let zf of files) {
+                                            if (zf.dir) continue;
+                                            if (zf.name.startsWith(rootFolder)) {
+                                                const relPath = zf.name.substring(rootFolder.length);
+                                                const content = await zf.async('string');
+                                                await fs.write(`${typeFolder}/${itemId}/${relPath}`, content);
+                                            }
+                                            i++;
+                                            pBar.style.width = ((i / files.length) * 100) + '%';
+                                        }
+                                        pText.innerText = 'Reloading...';
+                                        setTimeout(() => location.reload(), 500);
+                                    } else {
+                                        fluxide.ui.modal.close();
+                                    }
+                                } catch(err) {
+                                    fluxide.ui.modal.close();
+                                }
+                            }
+                        }
+                    });
+
+                    contentArea.appendChild(h('div', { style: { display: 'flex', justifyContent: 'flex-end', marginBottom: '8px' } }, [
+                        importInput,
+                        h('button', { class: 'fx-btn', style: { padding: '8px 16px' }, onClick: () => importInput.click() }, 'Import Package (.zip)')
+                    ]));
+
+                    extensions.sort((a,b) => a.type.localeCompare(b.type)).forEach(ext => {
+                        const isQueuedDel = pendingActions.some(a => a.type === 'delete' && a.path === ext.path);
+                        const isQueuedToggle = pendingActions.some(a => (a.type === 'disable' || a.type === 'enable') && a.path === ext.path);
+                        
+                        const willBeDisabled = (ext.disabled && !isQueuedToggle) || (!ext.disabled && pendingActions.some(a => a.type === 'disable' && a.path === ext.path));
+
+                        const card = h('div', { style: { background: 'var(--surface-low)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: isQueuedDel ? '0.5' : '1' } }, [
+                            h('div', { style: { display: 'flex', gap: '20px', alignItems: 'center' } }, [
+                                h('div', { style: { width: '48px', height: '48px', fontSize: '20px', borderRadius: '8px', background: 'var(--surface-high)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text)', opacity: willBeDisabled ? '0.5' : '1' } }, ext.name.substring(0,1).toUpperCase()),
+                                h('div', {}, [
+                                    h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' } }, [
+                                        h('span', { style: { fontWeight: 600, fontSize: '15px', color: willBeDisabled ? 'var(--text-dim)' : 'var(--text)', textDecoration: willBeDisabled ? 'line-through' : 'none' } }, ext.name),
+                                        h('span', { style: { padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', background: 'var(--surface-high)', color: 'var(--text-dim)' } }, ext.type),
+                                        h('span', { style: { fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-code)' } }, 'v' + ext.version)
+                                    ]),
+                                    h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, `By ${ext.author}`)
+                                ])
+                            ]),
+                            h('div', { style: { display: 'flex', gap: '8px' } }, [
+                                h('button', { class: 'fx-btn', style: { padding: '6px 12px' }, disabled: isQueuedDel, onClick: () => {
+                                    if (ext.id === 'manager' || ext.id === 'ide') return;
+                                    const actionType = ext.disabled ? 'enable' : 'disable';
+                                    const existingIdx = pendingActions.findIndex(a => (a.type === 'disable' || a.type === 'enable') && a.path === ext.path);
+                                    if (existingIdx > -1) pendingActions.splice(existingIdx, 1);
+                                    else pendingActions.push({ type: actionType, path: ext.path, itemType: ext.type, itemId: ext.id, name: ext.name });
+                                    fluxide.settings.requestReload();
+                                    renderUI();
+                                }}, isQueuedToggle ? 'Queued' : (ext.disabled ? 'Enable' : 'Disable')),
+                                h('button', { class: 'fx-btn', style: { padding: '6px 12px' }, disabled: isQueuedDel, onClick: async () => {
+                                    if(!window.JSZip) return;
+                                    const zip = new JSZip();
+                                    Object.keys(vfs).forEach(p => {
+                                        if(p.startsWith(ext.path + '/') && !p.endsWith('/.keep')) {
+                                            zip.file(p.substring(ext.path.length + 1), vfs[p]);
+                                        }
+                                    });
+                                    const blob = await zip.generateAsync({ type: 'blob' });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a'); a.href = url; a.download = `${ext.id}_${ext.version}.zip`; a.click(); URL.revokeObjectURL(url);
+                                }}, 'Export'),
+                                h('button', { class: 'fx-btn', disabled: isQueuedDel, style: { padding: '6px 12px', color: isQueuedDel ? 'var(--text-dim)' : 'var(--danger)', borderColor: isQueuedDel ? 'var(--border)' : 'var(--danger-border)' }, onClick: () => {
+                                    if (ext.id === 'manager' || ext.id === 'ide') return;
+                                    pendingActions.push({ type: 'delete', path: ext.path, name: ext.name });
+                                    fluxide.settings.requestReload();
+                                    renderUI();
+                                }}, isQueuedDel ? 'Queued' : 'Uninstall')
+                            ])
+                        ]);
+                        contentArea.appendChild(card);
+                    });
+                } else if (activeTab === 'market') {
+                    const searchBar = h('input', {
+                        class: 'fx-input',
+                        placeholder: 'Search marketplace...',
+                        value: marketSearch,
+                        style: { marginBottom: '16px', padding: '10px 14px' },
+                        onInput: (e) => { marketSearch = e.target.value; renderUI(); }
+                    });
+                    contentArea.appendChild(searchBar);
+
+                    if (loadingMarket) {
+                        contentArea.appendChild(h('div', { style: { color: 'var(--text-dim)', padding: '40px', textAlign: 'center' } }, 'Fetching Market Data...'));
+                    } else if (marketItems.length === 0) {
+                        contentArea.appendChild(h('div', { style: { color: 'var(--text-dim)', padding: '40px', textAlign: 'center' } }, 'No items available in the market.'));
+                    } else {
+                        const q = marketSearch.toLowerCase();
+                        const filtered = marketItems.filter(i => i.name.toLowerCase().includes(q) || i.author.toLowerCase().includes(q) || i.type.toLowerCase().includes(q));
+                        
+                        const grid = h('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' } });
+                        
+                        filtered.forEach(ext => {
+                            let isInstalled = false;
+                            if (ext.type === 'plugin') isInstalled = Object.keys(state.get().vfs).some(p => p.startsWith(`plugins/${ext.item_id}/`) || p.startsWith(`disabled/${ext.item_id}/`));
+                            else if (ext.type === 'theme') isInstalled = Object.keys(state.get().vfs).some(p => p.startsWith(`themes/${ext.item_id}/`) || p.startsWith(`disabled/${ext.item_id}/`));
+                            else if (ext.type === 'icon_pack') isInstalled = Object.keys(state.get().vfs).some(p => p.startsWith(`icon-packs/${ext.item_id}/`) || p.startsWith(`disabled/${ext.item_id}/`));
+
+                            const card = h('div', { style: { background: 'var(--surface-low)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', cursor: 'pointer', display: 'flex', flexDirection: 'column', padding: '20px', transition: 'transform 0.2s, border-color 0.2s' },
+                                onMouseOver: (e) => { e.currentTarget.style.borderColor = 'var(--accent)'; e.currentTarget.style.transform = 'translateY(-2px)'; },
+                                onMouseOut: (e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.transform = 'translateY(0)'; },
+                                onClick: () => { viewingItem = ext; detailsTab = 'details'; renderUI(); } }, [
+                                h('div', { style: { display: 'flex', gap: '16px', alignItems: 'center', marginBottom: '16px' } }, [
+                                    h('div', { style: { width: '48px', height: '48px', fontSize: '20px', borderRadius: '12px', background: 'var(--surface-high)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text)', flexShrink: 0 } }, ext.name.substring(0,1).toUpperCase()),
+                                    h('div', { style: { flex: 1, minWidth: 0 } }, [
+                                        h('h3', { style: { margin: '0 0 4px 0', fontSize: '16px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } }, ext.name),
+                                        h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, `By ${ext.author}`)
+                                    ])
+                                ]),
+                                h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' } }, [
+                                    h('div', { style: { display: 'flex', gap: '8px', alignItems: 'center' } }, [
+                                        h('span', { style: { padding: '2px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', background: 'var(--surface-high)', color: 'var(--text-dim)' } }, ext.type.replace('_', ' ')),
+                                        isInstalled ? h('span', { style: { fontSize: '11px', color: '#10b981' } }, 'Installed') : h('span', {})
+                                    ]),
+                                    h('div', { style: { display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text)' } }, [
+                                        h('span', { style: { color: 'var(--accent)' } }, '★'),
+                                        ext.upvotes || 0
+                                    ])
+                                ])
+                            ]);
+                            grid.appendChild(card);
+                        });
+                        contentArea.appendChild(grid);
+                    }
+                }
+
+                if (pendingActions.length > 0) {
+                    const notice = h('div', { style: { background: 'var(--accent-glow)', padding: '16px 24px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--accent)', color: 'var(--text)', fontSize: '14px', marginTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 } }, [
+                        h('span', {}, `${pendingActions.length} action(s) queued. Apply changes in the main window to proceed.`),
+                        h('button', { class: 'fx-btn', style: { padding: '6px 12px', fontSize: '12px', background: 'transparent', borderColor: 'var(--accent)' }, onClick: () => { pendingActions = []; renderUI(); } }, 'Clear Queue')
+                    ]);
+                    contentArea.appendChild(notice);
+                }
+            };
+
+            if (marketItems.length === 0 && !loadingMarket) {
+                loadingMarket = true;
+                fetch('https://darksoulq.pythonanywhere.com/api/items')
+                    .then(r => r.json())
+                    .then(d => { marketItems = d.items || []; loadingMarket = false; renderUI(); })
+                    .catch(() => { loadingMarket = false; renderUI(); });
+            }
+
+            renderUI();
+        });
+    }
 });
