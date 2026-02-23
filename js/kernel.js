@@ -50,6 +50,14 @@ const fluxide = (() => {
 		getComponents: (slot) => Array.from((r.components.get(slot) || new Map()).values()),
 		registerSetting: (cat, st) => { r.settings.push({ category: cat, ...st }); },
 		getSettings: () => r.settings,
+        requireReload: (msg = "A reload is required to apply changes.") => {
+            if (document.getElementById('fx-reload-banner')) return;
+            const banner = document.createElement('div');
+            banner.id = 'fx-reload-banner';
+            banner.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--surface-high); border: 1px solid var(--border); padding: 12px 24px; border-radius: var(--radius-md); z-index: 9999; display: flex; align-items: center; gap: 16px; box-shadow: var(--shadow); font-family: var(--font);';
+            banner.innerHTML = `<span style="color: var(--text); font-size: 13px; font-weight: 600;">${msg}</span><button class="fx-btn fx-btn-primary" onclick="location.reload()">Reload Now</button>`;
+            document.body.appendChild(banner);
+        },
 		plugins: {
 			has: (id) => r.loadedPlugins.has(id),
 			get: (id) => r.loadedPlugins.get(id)
@@ -159,17 +167,31 @@ const fluxide = (() => {
 			const mountScreen = document.getElementById('fx-mount-screen');
 			const btn = document.getElementById('fx-btn-new-mount');
 			const status = await FSManager.init();
-			if (status === true) { mountScreen.style.display = 'none'; await this.startServices(); } 
-			else if (status === 'prompt') {
-				btn.innerText = 'Resume Workspace';
-				btn.onclick = async () => {
-					const handle = await IDB.get('workspace_handle');
-					if ((await handle.requestPermission({ mode: 'readwrite' })) === 'granted') {
-						FSManager.dirHandle = handle; mountScreen.style.opacity = '0'; setTimeout(() => { mountScreen.style.display = 'none'; this.startServices(); }, 300);
-					}
-				};
+			
+            if (status === true) { 
+                mountScreen.style.display = 'none'; 
+                await this.startServices(); 
+            } else if (status === 'prompt') {
+                mountScreen.style.display = 'none';
+                const overlay = document.createElement('div');
+                overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.8);z-index:99999;display:flex;align-items:center;justify-content:center;color:var(--text);font-family:var(--font);font-size:18px;font-weight:600;cursor:pointer;backdrop-filter:blur(5px); transition: 0.3s;';
+                overlay.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:16px;"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg><span>Click anywhere to resume workspace</span></div>';
+                document.body.appendChild(overlay);
+                overlay.onclick = async () => {
+                    const handle = await IDB.get('workspace_handle');
+                    if ((await handle.requestPermission({ mode: 'readwrite' })) === 'granted') {
+                        FSManager.dirHandle = handle;
+                        overlay.style.opacity = '0';
+                        setTimeout(() => { overlay.remove(); this.startServices(); }, 300);
+                    }
+                };
 			} else {
-				btn.onclick = async () => { if (await FSManager.mount()) { mountScreen.style.opacity = '0'; setTimeout(() => { mountScreen.style.display = 'none'; this.startServices(); }, 300); } };
+				btn.onclick = async () => { 
+                    if (await FSManager.mount()) { 
+                        mountScreen.style.opacity = '0'; 
+                        setTimeout(() => { mountScreen.style.display = 'none'; this.startServices(); }, 300); 
+                    } 
+                };
 			}
 		},
 

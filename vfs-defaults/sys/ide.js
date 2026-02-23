@@ -15,7 +15,6 @@ const IDE = {
 	consoleLogs: null,
 	consoleEl: null,
 	_container: null,
-    commands: [],
 
 	searchMarks: [],
 	searchState: { q: '', r: '', case: false, word: false, cursor: null, matchCount: 0, current: 0, replaceOpen: false },
@@ -28,7 +27,6 @@ const IDE = {
 		this.renderTree = this.renderTree.bind(this);
 		this.openDocsModal = this.openDocsModal.bind(this);
 		this.openQuickSearch = this.openQuickSearch.bind(this);
-		this.openCommandPalette = this.openCommandPalette.bind(this);
 		this.logToConsole = this.logToConsole.bind(this);
 		this.toggleSearch = this.toggleSearch.bind(this);
 		this.openProjectCreationModal = this.openProjectCreationModal.bind(this);
@@ -37,11 +35,11 @@ const IDE = {
 			openFile: this.openFile, 
 			closeTab: this.closeTab, 
 			switchTab: this.openFile,
+			getActiveTab: () => this.activeTab,
+			getOpenTabs: () => [...this.openTabs],
 			listFiles: () => Object.keys(state.get().vfs),
 			log: this.logToConsole,
 			clearLogs: () => { if(this.consoleLogs) this.consoleLogs.innerHTML = ''; },
-            commands: this.commands,
-            registerCommand: (id, name, action) => this.commands.push({ id, name, action }),
 			headerTools: [],
 			treeContext: [],
 			editorContext: [],
@@ -56,12 +54,12 @@ const IDE = {
 				this.dirtyFiles.delete(this.activeTab);
 				this.renderTabs();
 				this.logToConsole(`Saved: ${this.activeTab}`, 'success');
+				emit('ide:file_saved', this.activeTab);
 			} 
 		}, "Save Current File");
 		
 		fluxide.keybinds.register('ide.closeTab', 'Ctrl-W', () => { if(this.activeTab) this.closeTab(this.activeTab); }, "Close Active Tab");
 		fluxide.keybinds.register('ide.quickOpen', 'Ctrl-P', () => { this.openQuickSearch(); }, "Quick Open File Search");
-		fluxide.keybinds.register('ide.commandPalette', 'Ctrl-Shift-P', () => { this.openCommandPalette(); }, "Command Palette");
 		fluxide.keybinds.register('ide.toggleConsole', 'Ctrl-`', () => { this.toggleConsole(); }, "Toggle Output Console");
 		fluxide.keybinds.register('ide.search', 'Ctrl-F', () => { this.toggleSearch(false); }, "Search within file");
 		fluxide.keybinds.register('ide.replace', 'Ctrl-H', () => { this.toggleSearch(true); }, "Replace within file");
@@ -88,74 +86,29 @@ const IDE = {
 		on('settings:change', () => { this.updateEditorSettings(); });
 	},
 
-	openCommandPalette() {
-		modal(win => {
-            const allCommands = fluxide.keybinds.getAll().map(k => ({ label: k.description || k.id, sub: k.id, key: k.key, action: k.action }));
-            if (this.commands) {
-                this.commands.forEach(c => allCommands.push({ label: c.name, sub: c.id, action: c.action }));
-            }
-
-			const inputContainer = h('div', { style: { display: 'flex', alignItems: 'center', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '0 12px' } }, [
-				h('div', { innerHTML: theme.getIcon('terminal'), style: { width: '16px', height: '16px', color: 'var(--text-dim)' } }),
-				h('input', { class: 'fx-input', style: { border: 'none', background: 'transparent', boxShadow: 'none' }, placeholder: 'Search commands...' })
-			]);
-			const input = inputContainer.querySelector('input');
-			const list = h('div', { style: { marginTop: '10px', maxHeight: '350px', overflowY: 'auto' } });
-			
-            let selectedIndex = 0;
-            let currentFiltered = [];
-
-			const renderList = (filter) => {
-				list.innerHTML = '';
-				const f = filter.toLowerCase();
-				currentFiltered = allCommands.filter(c => c.label.toLowerCase().includes(f) || (c.sub && c.sub.toLowerCase().includes(f)));
-                if(selectedIndex >= currentFiltered.length) selectedIndex = Math.max(0, currentFiltered.length - 1);
-
-                currentFiltered.forEach((c, idx) => {
-                    const isActive = idx === selectedIndex;
-                    const item = h('div', {
-                        class: 'ctx-item' + (isActive ? ' active' : ''),
-                        style: { padding: '10px 14px', borderBottom: '1px solid var(--border)', gap: '12px', background: isActive ? 'var(--accent-glow)' : 'transparent', color: isActive ? 'var(--text)' : 'var(--text-dim)' },
-                        onMouseOver: () => { selectedIndex = idx; renderList(input.value); },
-                        onClick: () => { modal.close(); c.action(); }
-                    }, [
-                        h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column' } }, [
-                            h('span', { style: { fontSize: '13px', fontWeight: isActive ? 600 : 500 } }, c.label),
-                            h('span', { style: { fontSize: '10px', color: isActive ? 'rgba(255,255,255,0.7)' : 'var(--text-dark)', marginTop: '2px', fontFamily: 'var(--font-code)' } }, c.sub)
-                        ]),
-                        c.key ? h('div', { class: 'ctx-keybind', style: { color: isActive ? 'rgba(255,255,255,0.9)' : '' } }, c.key) : h('div', {})
-                    ]);
-                    list.appendChild(item);
-                });
-			};
-			input.oninput = (e) => { selectedIndex = 0; renderList(e.target.value); };
-            input.onkeydown = (e) => {
-                if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, currentFiltered.length - 1); renderList(input.value); }
-                else if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); renderList(input.value); }
-                else if (e.key === 'Enter') { e.preventDefault(); if(currentFiltered[selectedIndex]) { modal.close(); currentFiltered[selectedIndex].action(); } }
-            };
-
-			win.appendChild(h('div', { class: 'fx-modal-body' }, [ h('h3', { style: { marginTop: 0, marginBottom: '20px', fontSize: '14px', color: 'var(--text-dim)' } }, 'Command Palette'), inputContainer, list ]));
-			renderList('');
-			setTimeout(() => input.focus(), 50);
-		});
-		const overlay = document.getElementById('fx-modal-overlay');
-		overlay.onclick = (e) => { if (e.target === overlay) modal.close(); };
-	},
-
 	openFile(path) {
-		if (!this.openTabs.includes(path)) this.openTabs.push(path);
+		let isNew = false;
+		if (!this.openTabs.includes(path)) {
+			this.openTabs.push(path);
+			isNew = true;
+		}
 		this.activeTab = path;
 		this.closeSearch();
 		if (state.get().activeView === 'ide') this.renderFull();
+		if (isNew) emit('ide:file_opened', path);
+		emit('ide:tab_switched', path);
 	},
 
 	closeTab(path) {
 		this.openTabs = this.openTabs.filter(t => t !== path);
 		this.dirtyFiles.delete(path);
-		if (this.activeTab === path) this.activeTab = this.openTabs[this.openTabs.length - 1] || null;
+		if (this.activeTab === path) {
+			this.activeTab = this.openTabs[this.openTabs.length - 1] || null;
+			emit('ide:tab_switched', this.activeTab);
+		}
 		this.closeSearch();
 		this.renderFull();
+		emit('ide:file_closed', path);
 	},
 
 	openQuickSearch() {
@@ -466,6 +419,7 @@ const IDE = {
 						
 						this.renderTree();
 						this.logToConsole(`Created ${type}: ${id}`, 'success');
+						emit('ide:project_created', { type, id });
 						modal.close();
 					}}, 'Create')
 				])
@@ -541,6 +495,7 @@ const IDE = {
 				state.update(s => s.vfs[this.activeTab] = cm.getValue());
 				this.dirtyFiles.add(this.activeTab);
 				this.renderTabs();
+				emit('ide:file_changed', { path: this.activeTab, content: cm.getValue() });
 			}
 			this.updateStatusBar();
 			if(this.searchPanelEl && this.searchPanelEl.style.display !== 'none') this.runSearch();
@@ -552,7 +507,7 @@ const IDE = {
 
 		this.editorContainer.oncontextmenu = (e) => {
 			const baseCtx = [
-				{ label: 'Save File', key: 'Ctrl-S', icon: theme.getIcon('save'), action: async () => { if(this.activeTab) { await fluxide.fs.write(this.activeTab, this.cm.getValue()); this.dirtyFiles.delete(this.activeTab); this.renderTabs(); this.logToConsole(`Saved: ${this.activeTab}`, 'success'); } } },
+				{ label: 'Save File', key: 'Ctrl-S', icon: theme.getIcon('save'), action: async () => { if(this.activeTab) { await fluxide.fs.write(this.activeTab, this.cm.getValue()); this.dirtyFiles.delete(this.activeTab); this.renderTabs(); this.logToConsole(`Saved: ${this.activeTab}`, 'success'); emit('ide:file_saved', this.activeTab); } } },
 				{ sep: true }, 
 				{ label: 'Quick Open', key: 'Ctrl-P', icon: theme.getIcon('search'), action: () => this.openQuickSearch() },
 				{ sep: true },
@@ -649,8 +604,13 @@ const IDE = {
 			await fluxide.fs.write(fullPath, type === 'folder' ? '' : '');
 			if(parentPath) this.expandedDirs.add(parentPath); 
 			this.logToConsole(`Created ${type}: ${fullPath}`, 'success');
-			if(type === 'file') this.openFile(fullPath);
-			else this.renderTree();
+			if(type === 'file') {
+				this.openFile(fullPath);
+				emit('ide:file_created', fullPath);
+			} else {
+				this.renderTree();
+				emit('ide:folder_created', fullPath);
+			}
 		}
 	},
 
@@ -733,9 +693,13 @@ const IDE = {
 									this.logToConsole(`Renamed: ${itemPath} -> ${newPath}`, 'info');
 									if(this.openTabs.includes(itemPath)) {
 										this.openTabs[this.openTabs.indexOf(itemPath)] = newPath;
-										if(this.activeTab === itemPath) this.activeTab = newPath;
+										if(this.activeTab === itemPath) {
+											this.activeTab = newPath;
+											emit('ide:tab_switched', newPath);
+										}
 									}
 									this.renderFull();
+									emit('ide:file_renamed', { oldPath: itemPath, newPath });
 								}
 							}});
 							menu.push({ sep: true }, { label: 'Delete File', icon: theme.getIcon('trash'), danger: true, action: async () => {
@@ -743,6 +707,7 @@ const IDE = {
 								this.logToConsole(`Deleted File: ${itemPath}`, 'error');
 								if(this.openTabs.includes(itemPath)) this.closeTab(itemPath);
 								this.renderTree();
+								emit('ide:file_deleted', itemPath);
 							}});
 						} else {
 							menu.push({ label: 'New File', icon: theme.getIcon('newFile'), action: () => this.promptNew('file', itemPath) });
@@ -763,13 +728,17 @@ const IDE = {
 											await fluxide.fs.write(targetPath, content); await fluxide.fs.remove(p);
 											if(this.openTabs.includes(p)) { 
 												this.openTabs[this.openTabs.indexOf(p)] = targetPath; 
-												if(this.activeTab === p) this.activeTab = targetPath; 
+												if(this.activeTab === p) {
+													this.activeTab = targetPath; 
+													emit('ide:tab_switched', targetPath);
+												}
 											}
 										}
 									});
 									this.expandedDirs.delete(itemPath); this.expandedDirs.add(newPath);
 									this.logToConsole(`Renamed Folder: ${itemPath} -> ${newPath}`, 'info');
 									this.renderFull();
+									emit('ide:folder_renamed', { oldPath: itemPath, newPath });
 								}
 							}});
 							
@@ -782,6 +751,7 @@ const IDE = {
 								});
 								this.logToConsole(`Deleted Folder: ${itemPath}`, 'error');
 								this.renderTree();
+								emit('ide:folder_deleted', itemPath);
 							}});
 						}
 						
@@ -826,9 +796,13 @@ const IDE = {
 										await fluxide.fs.write(newPath, content); await fluxide.fs.remove(itemPath);
 										if(this.openTabs.includes(itemPath)) {
 											this.openTabs[this.openTabs.indexOf(itemPath)] = newPath;
-											if(this.activeTab === itemPath) this.activeTab = newPath;
+											if(this.activeTab === itemPath) {
+												this.activeTab = newPath;
+												emit('ide:tab_switched', newPath);
+											}
 										}
 										this.logToConsole(`Moved File: ${itemPath} -> ${newPath}`, 'info');
+										emit('ide:item_moved', { oldPath: itemPath, newPath, isFile: true });
 									} else {
 										const folderName = itemPath.split('/').pop();
 										const newFolderPath = targetPath + '/' + folderName;
@@ -840,12 +814,16 @@ const IDE = {
 												await fluxide.fs.write(newP, content); await fluxide.fs.remove(p);
 												if(this.openTabs.includes(p)) {
 													this.openTabs[this.openTabs.indexOf(p)] = newP;
-													if(this.activeTab === p) this.activeTab = newP;
+													if(this.activeTab === p) {
+														this.activeTab = newP;
+														emit('ide:tab_switched', newP);
+													}
 												}
 											}
 										});
 										this.expandedDirs.delete(itemPath); this.expandedDirs.add(newFolderPath);
 										this.logToConsole(`Moved Folder: ${itemPath} -> ${newFolderPath}`, 'info');
+										emit('ide:item_moved', { oldPath: itemPath, newPath: newFolderPath, isFile: false });
 									}
 									this.renderFull();
 								}
@@ -888,34 +866,81 @@ const IDE = {
 								title: page.title
 							})).filter(page => vfs[page.path])
 						})).filter(sec => sec.pages.length > 0);
-						if(resolvedSections.length > 0) docsStructure.push({ pluginName, sections: resolvedSections });
+						if(resolvedSections.length > 0) docsStructure.push({ pluginName, sections: resolvedSections, isSystem: dir.startsWith('sys') });
 					} catch(e) {}
 				}
 			});
 
+			docsStructure.sort((a, b) => {
+			    if (a.isSystem && !b.isSystem) return -1;
+			    if (!a.isSystem && b.isSystem) return 1;
+			    return a.pluginName.localeCompare(b.pluginName);
+			});
+
 			let activeDoc = docsStructure.length > 0 && docsStructure[0].sections[0].pages.length > 0 ? docsStructure[0].sections[0].pages[0].path : null;
+
+			const expandedPlugins = new Set();
+			const expandedSections = new Set();
+
+			docsStructure.forEach(g => {
+			    g.sections.forEach(sec => {
+			        if (sec.pages.some(p => p.path === activeDoc) || g.isSystem) {
+			            expandedPlugins.add(g.pluginName);
+			            expandedSections.add(g.pluginName + '|' + sec.title);
+			        }
+			    });
+			});
 
 			const renderDocs = () => {
 				win.innerHTML = '';
-				const sidebar = h('div', { style: { width: '220px', borderRight: '1px solid var(--border)', padding: '20px 10px', overflowY: 'auto', background: 'var(--surface-low)', flexShrink: 0 } });
+				const sidebar = h('div', { style: { width: '240px', borderRight: '1px solid var(--border)', padding: '20px 10px', overflowY: 'auto', background: 'var(--surface-low)', flexShrink: 0 } });
 				const content = h('div', { class: 'prose', style: { flex: 1, padding: '40px', overflowY: 'auto', background: 'var(--bg)' } });
 
 				sidebar.appendChild(h('div', { style: { fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '15px', paddingLeft: '10px', letterSpacing: '1px' } }, 'DOCUMENTATION'));
 
 				docsStructure.forEach(g => {
-					sidebar.appendChild(h('div', { style: { fontSize: '12px', fontWeight: 800, color: 'var(--text)', margin: '15px 0 5px 10px' } }, g.pluginName));
-					g.sections.forEach(sec => {
-						sidebar.appendChild(h('div', { style: { fontSize: '10px', fontWeight: 700, color: 'var(--text-dark)', margin: '10px 0 5px 10px', textTransform: 'uppercase' } }, sec.title));
-						sec.pages.forEach(p => {
-							sidebar.appendChild(h('div', {
-								style: { padding: '8px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px', background: activeDoc === p.path ? 'var(--accent)' : 'transparent', color: activeDoc === p.path ? 'white' : 'var(--text-dim)', fontWeight: activeDoc === p.path ? 700 : 500 },
-								onClick: () => { activeDoc = p.path; renderDocs(); }
-							}, p.title));
-						});
-					});
+				    const isPluginExpanded = expandedPlugins.has(g.pluginName);
+					sidebar.appendChild(h('div', { 
+					    style: { fontSize: '12px', fontWeight: 800, color: 'var(--text)', margin: '15px 0 5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', userSelect: 'none' },
+					    onClick: () => {
+					        if (isPluginExpanded) expandedPlugins.delete(g.pluginName);
+					        else expandedPlugins.add(g.pluginName);
+					        renderDocs();
+					    }
+					}, [
+					    h('span', { style: { width: '16px', fontSize: '10px', color: 'var(--text-dim)', transition: 'transform 0.2s', transform: isPluginExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' } }, '▶'),
+					    g.pluginName
+					]));
+					
+					if (isPluginExpanded) {
+    					g.sections.forEach(sec => {
+    					    const secKey = g.pluginName + '|' + sec.title;
+    					    const isSecExpanded = expandedSections.has(secKey);
+    						sidebar.appendChild(h('div', { 
+    						    style: { fontSize: '10px', fontWeight: 700, color: 'var(--text-dark)', margin: '10px 0 5px 16px', textTransform: 'uppercase', cursor: 'pointer', display: 'flex', alignItems: 'center', userSelect: 'none' },
+    						    onClick: () => {
+    						        if (isSecExpanded) expandedSections.delete(secKey);
+    						        else expandedSections.add(secKey);
+    						        renderDocs();
+    						    }
+    						}, [
+    						    h('span', { style: { width: '14px', fontSize: '8px', color: 'var(--text-dim)', transition: 'transform 0.2s', transform: isSecExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display: 'inline-block' } }, '▶'),
+    						    sec.title
+    						]));
+    						
+    						if (isSecExpanded) {
+        						sec.pages.forEach(p => {
+        							sidebar.appendChild(h('div', {
+        								style: { padding: '8px 12px 8px 30px', borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontSize: '13px', background: activeDoc === p.path ? 'var(--accent)' : 'transparent', color: activeDoc === p.path ? 'white' : 'var(--text-dim)', fontWeight: activeDoc === p.path ? 700 : 500 },
+        								onClick: () => { activeDoc = p.path; renderDocs(); }
+        							}, p.title));
+        						});
+    						}
+    					});
+					}
 				});
 
-				if(activeDoc) content.innerHTML = fluxide.ui.markdown(vfs[activeDoc] || '*Document empty.*');
+				if(activeDoc) content.innerHTML = fluxide.ui.markdown(state.get().vfs[activeDoc] || '*Document empty.*');
 
 				const container = h('div', { style: { display: 'flex', height: '75vh', minHeight: '500px', width: '100%' } }, [ sidebar, content ]);
 				const closeBtn = h('button', { class: 'fx-btn fx-btn-primary', style: { position: 'absolute', top: '20px', right: '30px', zIndex: 10 }, onClick: () => modal.close() }, 'Close');
