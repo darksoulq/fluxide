@@ -19,6 +19,9 @@ fluxide.register({
         on('settings:apply', async () => {
             if (pendingActions.length === 0) return;
 
+            const actionsToProcess = [...pendingActions];
+            pendingActions = [];
+
             fluxide.ui.modal(win => {
                 win.innerHTML = '';
                 const pText = h('div', { style: { marginBottom: '16px', color: 'var(--text)', fontSize: '15px', fontWeight: 600 } }, 'Applying changes...');
@@ -31,14 +34,17 @@ fluxide.register({
 
                 (async () => {
                     let totalSteps = 0;
-                    for (const a of pendingActions) {
-                        if (a.type === 'install') totalSteps += Object.keys(a.files || {}).length;
-                        else totalSteps += 1;
+                    for (const a of actionsToProcess) {
+                        if (a.type === 'install') {
+                            totalSteps += Object.keys(a.files || {}).length;
+                        } else {
+                            totalSteps += Object.keys(state.get().vfs).filter(p => p.startsWith(a.path + '/')).length + 1;
+                        }
                     }
                     let currentStep = 0;
 
-                    for (let i = 0; i < pendingActions.length; i++) {
-                        const action = pendingActions[i];
+                    for (let i = 0; i < actionsToProcess.length; i++) {
+                        const action = actionsToProcess[i];
                         
                         if (action.type === 'install') {
                             pText.innerText = `Placing files for ${action.name || action.itemId}...`;
@@ -54,6 +60,8 @@ fluxide.register({
                             for (const p of pathsToDel) {
                                 delete state.get().vfs[p];
                                 await fs.remove(p);
+                                currentStep++;
+                                pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                             }
                             await fs.remove(action.path);
                             currentStep++;
@@ -69,6 +77,8 @@ fluxide.register({
                                 await fs.write(newPath, state.get().vfs[p]);
                                 delete state.get().vfs[p];
                                 await fs.remove(p);
+                                currentStep++;
+                                pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                             }
                             await fs.remove(action.path);
                             currentStep++;
@@ -81,7 +91,6 @@ fluxide.register({
                     setTimeout(() => location.reload(), 500);
                 })();
             });
-            pendingActions = [];
         });
 
         on('settings:cancel', () => { pendingActions = []; });
@@ -177,7 +186,6 @@ fluxide.register({
                             } catch(err) {
                                 const errBtn = h('button', { class: 'fx-btn', disabled: true }, 'Failed');
                                 pBarContainer.parentNode.replaceChild(errBtn, pBarContainer);
-                                fluxide.ide?.log('Failed to prepare package.', 'error');
                             }
                         }
                     }, isInstalled || isDisabled ? 'Installed' : (queuedInstall ? 'Queued (Install)' : 'Install'));
@@ -364,11 +372,9 @@ fluxide.register({
                                         renderUI();
                                     } else {
                                         fluxide.ui.modal.close();
-                                        fluxide.ide?.log('Invalid zip (missing meta file)', 'error');
                                     }
                                 } catch(err) {
                                     fluxide.ui.modal.close();
-                                    fluxide.ide?.log('Failed to extract ZIP', 'error');
                                 }
                             }
                         }
