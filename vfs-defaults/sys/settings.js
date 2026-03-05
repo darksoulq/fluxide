@@ -5,6 +5,7 @@ const Settings = {
     tree: [],
     expanded: new Set(),
     activeTab: null,
+    searchQuery: '',
     draft: {},
     _container: null,
     pendingReload: false,
@@ -21,6 +22,14 @@ const Settings = {
             .fx-toggle input:checked + .fx-toggle-slider:before { transform: translateX(16px); background-color: #fff; }
             .fx-form-group.fx-toggle-group { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; background: rgba(0,0,0,0.1); padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid transparent; transition: background-color 0.3s, border-color 0.3s; }
             .fx-form-group.fx-toggle-group:hover { border-color: var(--border); background: var(--surface-low); }
+            
+            .fx-dd-item { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; cursor: grab; user-select: none; transition: border-color 0.2s, box-shadow 0.2s; }
+            .fx-dd-item:active { cursor: grabbing; }
+            .fx-dd-item.dragging { opacity: 0.4; }
+            .fx-dd-btn { background: transparent; border: none; cursor: pointer; color: var(--text-dim); padding: 4px; display: flex; align-items: center; justify-content: center; border-radius: 4px; transition: 0.2s; }
+            .fx-dd-btn:hover { background: var(--surface-high); color: var(--text); }
+            .fx-dd-btn.add:hover { color: var(--accent); }
+            .fx-dd-btn.rem:hover { color: var(--danger); }
         `;
         if(!document.getElementById('fx-settings-styles')) document.head.appendChild(style);
 
@@ -100,11 +109,15 @@ const Settings = {
 
         fluxide.settings.register('appearance.general', {
             label: 'General UI',
-            defaults: { ui_scale: '1.0', theme: 'dracula', icon_pack: 'default' }
+            defaults: { ui_scale: '1.0', theme: ['dracula'], icon_pack: ['default'] }
         });
-        fluxide.settings.register('appearance.keybinds', { label: 'Keybindings' });
+        fluxide.settings.register('editor.general', {
+            label: 'General',
+            defaults: { dev_mode: 'false' }
+        });
+        fluxide.settings.register('system.keybindings', { label: 'Keybindings' });
         
-        on('settings:render:appearance.general', ({container}) => {
+        on('settings:render:appearance.general', ({container, values}) => {
             container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px', color: 'var(--text)' } }, 'General UI'));
             
             const themes = [];
@@ -124,143 +137,153 @@ const Settings = {
                 }
             });
 
-            container.appendChild(fluxide.settings.createControl('Theme', 'select', 'theme', { options: themes }));
-            container.appendChild(fluxide.settings.createControl('Icon Pack', 'select', 'icon_pack', { options: iconPacks }));
+            const getArr = (key, def) => {
+                let v = values[key] !== undefined ? values[key] : state.get().settings[key];
+                if (!v) return [def];
+                if (typeof v === 'string') {
+                    try { const p = JSON.parse(v); if(Array.isArray(p)) return p; } catch(e) {}
+                    return [v];
+                }
+                if (Array.isArray(v)) return v;
+                return [def];
+            };
+
+            const renderDualPane = (title, key, allOpts) => {
+                const wrap = h('div', { class: 'fx-form-group', style: { marginBottom: '32px' } });
+                wrap.appendChild(h('div', { style: { fontSize: '14px', fontWeight: 600, color: 'var(--text)', marginBottom: '12px' } }, title));
+
+                let curr = getArr(key, key === 'theme' ? 'dracula' : 'default');
+                const activeIds = curr.filter(Boolean);
+                const availableOpts = allOpts.filter(o => !activeIds.includes(o.value));
+                const activeOpts = activeIds.map(id => allOpts.find(o => o.value === id) || {label: id, value: id});
+
+                const dualContainer = h('div', { style: { display: 'flex', gap: '16px', height: '240px' } });
+
+                const availCol = h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--surface-low)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' } });
+                availCol.appendChild(h('div', { style: { padding: '10px 14px', background: 'var(--surface-high)', fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' } }, 'AVAILABLE'));
+                const availList = h('div', { style: { flex: 1, overflowY: 'auto', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' } });
+                
+                const activeCol = h('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--surface-low)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', overflow: 'hidden' } });
+                activeCol.appendChild(h('div', { style: { padding: '10px 14px', background: 'var(--surface-high)', fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', borderBottom: '1px solid var(--border)' } }, 'ACTIVE (TOP OVERRIDES BOTTOM)'));
+                const activeList = h('div', { style: { flex: 1, overflowY: 'auto', padding: '10px', display: 'flex', flexDirection: 'column', gap: '8px' } });
+
+                availList.ondragover = e => e.preventDefault();
+                availList.ondrop = e => {
+                    e.preventDefault();
+                    try {
+                        const payload = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+                        if (payload.type === 'active') {
+                            const n = [...activeIds];
+                            n.splice(payload.idx, 1);
+                            fluxide.settings.set(key, n);
+                        }
+                    } catch(err){}
+                };
+
+                activeList.ondragover = e => e.preventDefault();
+                activeList.ondrop = e => {
+                    e.preventDefault();
+                    try {
+                        const payload = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+                        const n = [...activeIds];
+                        if (payload.type === 'available') {
+                            n.push(payload.id);
+                        } else if (payload.type === 'active') {
+                            const [removed] = n.splice(payload.idx, 1);
+                            n.push(removed);
+                        }
+                        fluxide.settings.set(key, n);
+                    } catch(err){}
+                };
+
+                availableOpts.forEach(opt => {
+                    const item = h('div', { class: 'fx-dd-item', draggable: 'true' });
+                    item.ondragstart = e => { 
+                        e.dataTransfer.setData('text/plain', JSON.stringify({type: 'available', id: opt.value})); 
+                        setTimeout(() => item.classList.add('dragging'), 0);
+                    };
+                    item.ondragend = () => item.classList.remove('dragging');
+                    
+                    item.appendChild(h('span', { style: { fontSize: '13px', color: 'var(--text)', fontWeight: 500 } }, opt.label));
+                    
+                    const btn = h('button', { class: 'fx-dd-btn add', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>', onClick: () => {
+                        fluxide.settings.set(key, [...activeIds, opt.value]);
+                    }});
+                    item.appendChild(btn);
+                    availList.appendChild(item);
+                });
+
+                if (availableOpts.length === 0) {
+                    availList.appendChild(h('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic', background: 'rgba(0,0,0,0.1)', borderRadius: '6px' } }, 'No items left'));
+                }
+
+                activeOpts.forEach((opt, idx) => {
+                    const item = h('div', { class: 'fx-dd-item', draggable: 'true' });
+                    item.ondragstart = e => { 
+                        e.dataTransfer.setData('text/plain', JSON.stringify({type: 'active', idx}));
+                        setTimeout(() => item.classList.add('dragging'), 0);
+                    };
+                    item.ondragend = () => {
+                        item.classList.remove('dragging');
+                        activeList.querySelectorAll('.fx-dd-item').forEach(el => el.style.boxShadow = 'none');
+                    };
+                    
+                    item.ondragover = e => { e.preventDefault(); item.style.boxShadow = '0 -2px 0 var(--accent)'; };
+                    item.ondragleave = () => { item.style.boxShadow = 'none'; };
+                    item.ondrop = e => {
+                        e.preventDefault(); e.stopPropagation();
+                        item.style.boxShadow = 'none';
+                        try {
+                            const payload = JSON.parse(e.dataTransfer.getData('text/plain') || '{}');
+                            const n = [...activeIds];
+                            if (payload.type === 'available') {
+                                n.splice(idx, 0, payload.id);
+                            } else if (payload.type === 'active') {
+                                const [removed] = n.splice(payload.idx, 1);
+                                n.splice(idx, 0, removed);
+                            }
+                            fluxide.settings.set(key, n);
+                        } catch(err){}
+                    };
+
+                    const left = h('div', { style: { display: 'flex', gap: '10px', alignItems: 'center' } }, [
+                        h('span', { style: { color: 'var(--text-dim)', letterSpacing: '-2px', fontSize: '14px', marginTop: '-2px' } }, '⋮⋮'),
+                        h('span', { style: { fontSize: '13px', color: 'var(--text)', fontWeight: 600 } }, opt.label)
+                    ]);
+                    
+                    const btn = h('button', { class: 'fx-dd-btn rem', innerHTML: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>', onClick: () => {
+                        const n = [...activeIds]; n.splice(idx, 1);
+                        fluxide.settings.set(key, n);
+                    }});
+                    
+                    item.appendChild(left);
+                    item.appendChild(btn);
+                    activeList.appendChild(item);
+                });
+
+                if (activeOpts.length === 0) {
+                    activeList.appendChild(h('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-dim)', fontSize: '12px', fontStyle: 'italic', background: 'rgba(0,0,0,0.1)', borderRadius: '6px' } }, 'None selected'));
+                }
+
+                availCol.appendChild(availList);
+                activeCol.appendChild(activeList);
+                dualContainer.appendChild(availCol);
+                dualContainer.appendChild(activeCol);
+                wrap.appendChild(dualContainer);
+                return wrap;
+            };
+
+            container.appendChild(renderDualPane('Themes', 'theme', themes));
+            container.appendChild(renderDualPane('Icon Packs', 'icon_pack', iconPacks));
             container.appendChild(fluxide.settings.createControl('UI Scale', 'select', 'ui_scale', { options: [{value:'0.75',label:'75%'},{value:'0.9',label:'90%'},{value:'1.0',label:'100%'},{value:'1.1',label:'110%'},{value:'1.25',label:'125%'},{value:'1.5',label:'150%'}] }));
         });
 
-        const updateScale = (val) => {
-            let style = document.getElementById('fx-ui-scale');
-            if (!style) { style = document.createElement('style'); style.id = 'fx-ui-scale'; document.head.appendChild(style); }
-            style.innerHTML = `
-                #ide-sidebar, #ide-tabs, .fx-console, #fx-status, #fx-nav, .fx-settings-sidebar, .fx-modal-window { zoom: ${val}; }
-                #ide-editor .CodeMirror { font-size: calc(${val} * var(--editor-font-size, 14px)); }
-            `;
-            emit('ui:scale');
-        };
-
-        on('settings:change', ({key, val}) => {
-            if (key === 'ui_scale') {
-                updateScale(val);
-            }
-            if (key === 'theme') {
-                if (fluxide.theme) fluxide.theme.applyTheme(val);
-            }
-            if (key === 'icon_pack') {
-                this.pendingReload = true;
-            }
+        on('settings:render:editor.general', ({container}) => {
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px', color: 'var(--text)' } }, 'Editor General'));
+            container.appendChild(fluxide.settings.createControl('Developer Mode (Requires Reload)', 'toggle', 'dev_mode'));
         });
 
-        setTimeout(() => {
-            let scale = state.get().settings.ui_scale || '1.0';
-            if (scale === '1') scale = '1.0';
-            updateScale(scale);
-        }, 200);
-    },
-
-    openModal() {
-        if (!this.activeTab && this.tree.length > 0) {
-            const findFirst = (n) => (n.config || !n.children.length) ? n.id : findFirst(n.children[0]);
-            this.activeTab = findFirst(this.tree[0]);
-        }
-        this.draft = JSON.parse(JSON.stringify(state.get().settings));
-        modal(win => {
-            win.style.width = '80vw';
-            win.style.height = '80vh';
-            win.style.maxWidth = '1000px';
-            win.style.padding = '0';
-            this.render(win);
-        });
-    },
-
-    render(container) {
-        this._container = container;
-        container.style.display = 'grid';
-        container.style.gridTemplateColumns = '240px 1fr';
-        container.style.height = '100%';
-        container.style.borderRadius = 'var(--radius-md)';
-        container.style.overflow = 'hidden';
-        container.innerHTML = '';
-
-        const sidebar = h('div', { class: 'fx-settings-sidebar', style: { borderRight: '1px solid var(--border)', background: 'var(--surface-low)', overflowY: 'auto', transition: 'background-color 0.3s, border-color 0.3s' } }, [
-            h('div', { class: 'fx-settings-header', style: { padding: '20px', fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '1px' } }, 'SETTINGS'),
-            h('div', { class: 'fx-settings-tree' }, this.renderTree(this.tree, 0))
-        ]);
-
-        const contentWrap = h('div', { style: { display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative', overflow: 'hidden', transition: 'background-color 0.3s' } });
-        const closeBtn = h('button', { class: 'fx-icon-btn', style: { position: 'absolute', top: '15px', right: '15px', width: '32px', height: '32px', zIndex: 10 }, innerHTML: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>', onClick: () => { emit('settings:cancel'); modal.close(); } });
-        
-        const content = h('div', { class: 'fx-settings-content', style: { padding: '40px', overflowY: 'auto', flex: 1 } });
-        this.renderActiveTab(content, this.activeTab);
-
-        const footer = h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', background: 'var(--surface-low)', borderTop: '1px solid var(--border)' } }, [
-            h('button', { class: 'fx-btn', style: { padding: '10px 24px', fontSize: '13px' }, onClick: () => { emit('settings:cancel'); modal.close(); } }, 'Cancel'),
-            h('button', { class: 'fx-btn fx-btn-primary', style: { padding: '10px 24px', fontSize: '13px' }, onClick: async (e) => {
-                const originalText = e.target.innerText;
-                e.target.innerText = 'Applying...';
-                e.target.disabled = true;
-                Object.keys(this.draft).forEach(k => {
-                    if (this.draft[k] !== state.get().settings[k]) {
-                        state.update(s => s.settings[k] = this.draft[k]);
-                        emit('settings:change', { key: k, val: this.draft[k] });
-                    }
-                });
-                await emitAsync('settings:apply');
-                if (this.pendingReload) {
-                    setTimeout(() => location.reload(), 200);
-                } else {
-                    e.target.innerText = originalText;
-                    e.target.disabled = false;
-                }
-            }}, 'Apply Changes')
-        ]);
-
-        contentWrap.appendChild(closeBtn);
-        contentWrap.appendChild(content);
-        contentWrap.appendChild(footer);
-
-        container.appendChild(sidebar);
-        container.appendChild(contentWrap);
-    },
-
-    renderTree(nodes, depth) {
-        return nodes.map(node => {
-            const hasChildren = node.children && node.children.length > 0;
-            const isExpanded = this.expanded.has(node.id);
-            const isActive = this.activeTab === node.id;
-
-            const el = h('div', {
-                class: `tree-node ${isActive ? 'active' : ''}`,
-                style: { paddingLeft: (depth * 14 + 12) + 'px', padding: '8px 12px 8px ' + (depth * 14 + 12) + 'px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: isActive ? 'var(--text)' : 'var(--text-dim)', background: isActive ? 'var(--accent-glow)' : 'transparent', borderRadius: 'var(--radius-sm)', margin: '0 10px 2px 10px', transition: 'background-color 0.2s, color 0.2s' },
-                onMouseOver: (e) => { if(!isActive) e.currentTarget.style.background = 'var(--surface-hover)'; },
-                onMouseOut: (e) => { if(!isActive) e.currentTarget.style.background = 'transparent'; },
-                onClick: () => {
-                    if (hasChildren) {
-                        this.expanded.has(node.id) ? this.expanded.delete(node.id) : this.expanded.add(node.id);
-                    }
-                    if (node.config || !hasChildren) {
-                        this.activeTab = node.id;
-                    }
-                    this.render(this._container);
-                }
-            }, [
-                hasChildren ? h('div', { style: { width: '12px', display: 'flex', alignItems: 'center' }, innerHTML: isExpanded ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>' }) : h('div', { style: { width: '12px' } }),
-                h('span', { style: { fontWeight: isActive ? 600 : 500, fontSize: '13px' } }, node.label)
-            ]);
-
-            if (hasChildren && isExpanded) {
-                return [el, ...this.renderTree(node.children, depth + 1)];
-            }
-            return el;
-        }).flat();
-    },
-
-    renderActiveTab(container, id) {
-        if (!container) return;
-        container.innerHTML = '';
-        const values = this.draft;
-
-        if (id === 'appearance.keybinds') {
+        on('settings:render:system.keybindings', ({container}) => {
             container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px', color: 'var(--text)' } }, 'Keybindings'));
             fluxide.keybinds.getAll().forEach(kb => {
                 let currentKey = kb.key;
@@ -304,9 +327,183 @@ const Settings = {
                 ]);
                 container.appendChild(row);
             });
-        } else {
-            emit(`settings:render:${id}`, { container, values });
+        });
+
+        const updateScale = (val) => {
+            let style = document.getElementById('fx-ui-scale');
+            if (!style) { style = document.createElement('style'); style.id = 'fx-ui-scale'; document.head.appendChild(style); }
+            style.innerHTML = `
+                #ide-sidebar, #ide-tabs, .fx-console, #fx-status, #fx-nav, .fx-settings-sidebar, .fx-modal-window { zoom: ${val}; }
+                #ide-editor .CodeMirror { font-size: calc(${val} * var(--editor-font-size, 14px)); }
+            `;
+            emit('ui:scale');
+        };
+
+        on('settings:change', ({key, val}) => {
+            if (key === 'ui_scale') updateScale(val);
+            if (key === 'theme' && fluxide.theme) fluxide.theme.applyTheme(val);
+            if (key === 'icon_pack' && fluxide.ui && state.get().activeView) fluxide.ui.openView(state.get().activeView);
+            if (key === 'dev_mode') fluxide.settings.requestReload();
+        });
+
+        setTimeout(() => {
+            let scale = state.get().settings.ui_scale || '1.0';
+            if (scale === '1') scale = '1.0';
+            updateScale(scale);
+        }, 200);
+    },
+
+    openModal() {
+        if (!this.activeTab && this.tree.length > 0) {
+            const findFirst = (n) => (n.config || !n.children.length) ? n.id : findFirst(n.children[0]);
+            this.activeTab = findFirst(this.tree[0]);
         }
+        this.searchQuery = '';
+        this.draft = JSON.parse(JSON.stringify(state.get().settings));
+        modal(win => {
+            win.style.width = '80vw';
+            win.style.height = '80vh';
+            win.style.maxWidth = '1000px';
+            win.style.padding = '0';
+            this.render(win);
+        });
+    },
+
+    render(container) {
+        this._container = container;
+        container.style.display = 'grid';
+        container.style.gridTemplateColumns = '240px 1fr';
+        container.style.height = '100%';
+        container.style.borderRadius = 'var(--radius-md)';
+        container.style.overflow = 'hidden';
+        container.innerHTML = '';
+
+        const sidebar = h('div', { class: 'fx-settings-sidebar', style: { borderRight: '1px solid var(--border)', background: 'var(--surface-low)', overflowY: 'auto', display: 'flex', flexDirection: 'column' } });
+        sidebar.appendChild(h('div', { class: 'fx-settings-header', style: { padding: '20px 20px 10px 20px', fontSize: '11px', fontWeight: 800, color: 'var(--text-dim)', letterSpacing: '1px' } }, 'SETTINGS'));
+        
+        sidebar.appendChild(h('div', { style: { padding: '0 20px 20px 20px' } }, [
+            h('input', {
+                class: 'fx-input',
+                type: 'text',
+                placeholder: 'Search...',
+                value: this.searchQuery || '',
+                style: { width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: '13px' },
+                onInput: (e) => {
+                    this.searchQuery = e.target.value.toLowerCase();
+                    const contentDiv = this._container.querySelector('.fx-settings-content');
+                    if (contentDiv) this.renderActiveTab(contentDiv, this.activeTab);
+                    const allNodes = sidebar.querySelectorAll('.tree-node');
+                    if (this.searchQuery) {
+                        allNodes.forEach(n => { n.style.background = 'transparent'; n.style.color = 'var(--text-dim)'; });
+                    } else {
+                        this.render(this._container);
+                    }
+                }
+            })
+        ]));
+
+        sidebar.appendChild(h('div', { class: 'fx-settings-tree', style: { flex: 1, overflowY: 'auto' } }, this.renderTree(this.tree, 0)));
+
+        const contentWrap = h('div', { style: { display: 'flex', flexDirection: 'column', background: 'var(--bg)', position: 'relative', overflow: 'hidden' } });
+        const closeBtn = h('button', { class: 'fx-icon-btn', style: { position: 'absolute', top: '15px', right: '15px', width: '32px', height: '32px', zIndex: 10 }, innerHTML: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>', onClick: () => { emit('settings:cancel'); modal.close(); } });
+        
+        const content = h('div', { class: 'fx-settings-content', style: { padding: '40px', overflowY: 'auto', flex: 1 } });
+        this.renderActiveTab(content, this.activeTab);
+
+        const footer = h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '12px', padding: '20px 32px', background: 'var(--surface-low)', borderTop: '1px solid var(--border)' } }, [
+            h('button', { class: 'fx-btn', style: { padding: '10px 24px', fontSize: '13px' }, onClick: () => { emit('settings:cancel'); modal.close(); } }, 'Cancel'),
+            h('button', { class: 'fx-btn fx-btn-primary', style: { padding: '10px 24px', fontSize: '13px' }, onClick: async (e) => {
+                const originalText = e.target.innerText;
+                e.target.innerText = 'Applying...';
+                e.target.disabled = true;
+                Object.keys(this.draft).forEach(k => {
+                    if (JSON.stringify(this.draft[k]) !== JSON.stringify(state.get().settings[k])) {
+                        state.update(s => s.settings[k] = this.draft[k]);
+                        emit('settings:change', { key: k, val: this.draft[k] });
+                    }
+                });
+                await emitAsync('settings:apply');
+                if (this.pendingReload) {
+                    if (window.fluxide && window.fluxide.forceReload) setTimeout(() => window.fluxide.forceReload(), 200);
+                    else setTimeout(() => window.location.reload(), 200);
+                } else {
+                    e.target.innerText = originalText;
+                    e.target.disabled = false;
+                }
+            }}, 'Apply Changes')
+        ]);
+
+        contentWrap.appendChild(closeBtn);
+        contentWrap.appendChild(content);
+        contentWrap.appendChild(footer);
+
+        container.appendChild(sidebar);
+        container.appendChild(contentWrap);
+    },
+
+    renderTree(nodes, depth) {
+        return nodes.map(node => {
+            const hasChildren = node.children && node.children.length > 0;
+            const isExpanded = this.expanded.has(node.id);
+            const isActive = !this.searchQuery && this.activeTab === node.id;
+
+            const el = h('div', {
+                class: `tree-node ${isActive ? 'active' : ''}`,
+                style: { paddingLeft: (depth * 14 + 12) + 'px', padding: '8px 12px 8px ' + (depth * 14 + 12) + 'px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', color: isActive ? 'var(--text)' : 'var(--text-dim)', background: isActive ? 'var(--accent-glow)' : 'transparent', borderRadius: 'var(--radius-sm)', margin: '0 10px 2px 10px', transition: 'background-color 0.2s, color 0.2s' },
+                onMouseOver: (e) => { if(!isActive && !this.searchQuery) e.currentTarget.style.background = 'var(--surface-hover)'; },
+                onMouseOut: (e) => { if(!isActive && !this.searchQuery) e.currentTarget.style.background = 'transparent'; },
+                onClick: () => {
+                    this.searchQuery = '';
+                    if (hasChildren) this.expanded.has(node.id) ? this.expanded.delete(node.id) : this.expanded.add(node.id);
+                    if (node.config || !hasChildren) this.activeTab = node.id;
+                    this.render(this._container);
+                }
+            }, [
+                hasChildren ? h('div', { style: { width: '12px', display: 'flex', alignItems: 'center' }, innerHTML: isExpanded ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>' }) : h('div', { style: { width: '12px' } }),
+                h('span', { style: { fontWeight: isActive ? 600 : 500, fontSize: '13px' } }, node.label)
+            ]);
+
+            if (hasChildren && isExpanded) return [el, ...this.renderTree(node.children, depth + 1)];
+            return el;
+        }).flat();
+    },
+
+    renderActiveTab(container, id) {
+        if (!container) return;
+        container.innerHTML = '';
+        const values = this.draft;
+
+        if (this.searchQuery) {
+            container.appendChild(h('h2', { style: { marginTop: 0, marginBottom: '24px', fontSize: '20px', color: 'var(--text)' } }, `Search Results for "${this.searchQuery}"`));
+            let found = 0;
+            const leaves = [];
+            const getLeaves = (nodes) => {
+                nodes.forEach(n => { if (n.children.length === 0 || n.config) leaves.push(n); else getLeaves(n.children); });
+            };
+            getLeaves(this.tree);
+
+            leaves.forEach(leaf => {
+                const temp = h('div');
+                emit(`settings:render:${leaf.id}`, { container: temp, values });
+                Array.from(temp.children).forEach(child => {
+                    if (child.tagName === 'H2') return; 
+                    if (child.textContent.toLowerCase().includes(this.searchQuery)) {
+                        const pathText = leaf.id.split('.').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(' > ');
+                        const contextBadge = h('div', {style: {fontSize: '10px', color: 'var(--accent)', marginBottom: '8px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.5px'}}, pathText);
+                        const wrap = h('div', { style: { marginBottom: '24px', paddingBottom: '16px', borderBottom: '1px solid var(--border)' } });
+                        wrap.appendChild(contextBadge);
+                        wrap.appendChild(child);
+                        container.appendChild(wrap);
+                        found++;
+                    }
+                });
+            });
+
+            if (found === 0) container.appendChild(h('div', {style: {color: 'var(--text-dim)'}}, 'No settings found.'));
+            return;
+        }
+
+        emit(`settings:render:${id}`, { container, values });
     }
 };
 

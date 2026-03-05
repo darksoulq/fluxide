@@ -1,77 +1,42 @@
-# Registries & Core
+# Registry & Plugins
 
-These methods construct the core extensibility pipeline, permitting plugins to mount logic, inject components into other plugins, and declare preferences.
+The Registry handles the lifecycle of plugins, API exposure, component slots, and hot-reloading architectures.
 
-## Plugin Management
-
-### `fluxide.register(pluginConfig)`
-
-Mounts a plugin into the boot sequence. It accepts an identifier, an optional view rendering configuration, and initialization routines.
+## Registering a Plugin
+Plugins are initialized by passing an object to `fluxide.register()`.
 
 ```javascript
 fluxide.register({
-	id: 'my_plugin',
-	view: { id: 'view1', label: 'My View', order: 5 },
-	init(api) { 
-		fluxide.ide.log('Plugin initialized');
-	},
-	render(container, api) { 
-		container.appendChild(fluxide.ui.h('div', {}, 'View Active'));
-	}
+    id: 'my_plugin',
+    view: { 
+        id: 'my_plugin_view', 
+        label: 'My View', 
+        nav: true, 
+        order: 5 
+    },
+    init(api) {},
+    render(container, api) {},
+    unmount() {},
+    onDisable(api) {},
+    onUninstall(api) {
+        return api.ui.prompt("Type 'yes' to uninstall:").then(res => res === 'yes');
+    }
 });
 ```
 
-### `fluxide.expose(id, object)`
+## Plugin Data & Management
 
-Assigns an object directly to the global API namespace, allowing cross-plugin method execution.
+### `fluxide.plugins.has(id)`
+Returns `true` if the plugin was successfully loaded.
 
-```javascript
-fluxide.expose('customApi', {
-	executeTask: () => true
-});
-```
+### `fluxide.plugins.get(id)`
+Returns the metadata (`plugin.json`) for the specified plugin ID.
 
-## Hook Extensions
+### `fluxide.plugins.enable(id)` / `disable(id)`
+Toggles the active state of a plugin within `.fluxide/settings.json`. Disabling calls `onDisable()` and issues a reload request to strip hooks from memory.
 
-### `fluxide.registerComponent(slot, component)`
+### `fluxide.plugins.uninstall(id)`
+Awaits the optional `onUninstall(api)` lifecycle hook. If it returns false/rejects, the uninstallation is cancelled. If true, the system calls `unmount()`, deletes the plugin directory recursively from memory and disk, and refreshes the viewport.
 
-Allows plugins to inject HTML nodes dynamically into pre-defined slots maintained by primary plugins.
-
-```javascript
-fluxide.registerComponent('task-extra', {
-	id: 'custom-tag',
-	render: (taskData, api) => fluxide.ui.h('span', { class: 'fx-badge' }, taskData.id)
-});
-```
-
-### `fluxide.getComponents(slot)`
-
-Retrieves an array of all components actively mapped to a provided string slot.
-
-### `fluxide.registerSetting(category, settingConfig)`
-
-Automatically constructs and maps graphical interfaces in the user's System Preferences screen. Value mutations are inherently bound to the global state tree.
-
-```javascript
-fluxide.registerSetting('General', {
-	id: 'custom_toggle',
-	label: 'Enable Feature',
-	type: 'select',
-	options: [{value: 'true', label: 'On'}, {value: 'false', label: 'Off'}],
-	onchange: (val) => fluxide.emit('workspace:change')
-});
-```
-
-## Global Input
-
-### `fluxide.keybinds.register(id, keys, action, description)`
-
-Binds a global keyboard shortcut to a specific function execution.
-
-```javascript
-fluxide.keybinds.register('custom.action', 'Ctrl-M', () => executeAction(), 'Runs macro');
-```
-
-### `fluxide.keybinds.getAll()`
-
-Returns the complete keybind dictionary object.
+### `fluxide.plugins.reload(id)`
+Facilitates dynamic "micro updates". Safely triggers `unmount()`, flushes the registry module cache, re-reads the disk contents of `plugin.json` and the `.js` entry file, evaluates it natively, and invokes `init()` without requiring a page refresh.

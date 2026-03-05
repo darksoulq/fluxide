@@ -1,43 +1,30 @@
-# File System API
+# File System (VFS)
 
-The Kernel exposes a direct wrapper to the browser's Native File System Access API. Operations bypass standard browser caches, reading and writing directly to the user's mounted physical folder.
+The `fluxide.fs` object (backed by `FSManager`) acts as the bridge between Fluxide's in-memory state and the user's physical OS Directory Handle.
 
-### `fluxide.fs.write(path, content)`
+**Important:** The VFS state (`fluxide.state.get().vfs`) is an in-memory cache of the files. You *must* use `fluxide.fs` methods if you want changes to persist to the user's hard drive!
 
-Writes a string payload to the specified path. It automatically traverses the path and creates any non-existent intermediary directories before saving the file.
+### `await fluxide.fs.read(path)`
+Reads a file from the disk. Returns a string for text files, or a `File` object for binaries. Returns `null` if it doesn't exist.
 
+### `await fluxide.fs.write(path, content)`
+Writes data to the physical disk. Automatically creates intermediate folders. To create an empty folder, write a file ending with `/.keep`.
 ```javascript
-await fluxide.fs.write('data/config.json', '{"status": "ok"}');
+// Writes to disk
+await fluxide.fs.write('plugins/my_plug/data.json', '{}');
+
+// Update in-memory state simultaneously!
+fluxide.state.update(s => s.vfs['plugins/my_plug/data.json'] = '{}');
 ```
 
-### `fluxide.fs.read(path)`
+### `await fluxide.fs.remove(path)`
+Deletes a file or directory (recursively) from the disk.
 
-Retrieves the text content of a file at the specified path. Returns `null` if the file or path does not exist.
+### `await fluxide.fs.exists(path)`
+Returns a boolean indicating if the path exists on disk.
 
-```javascript
-const text = await fluxide.fs.read('data/config.json');
-```
+### `fluxide.fs.isBinary(path)`
+Returns a boolean. Internally checks against extensions: png, jpg, mp4, zip, wasm, ttf, etc.
 
-### `fluxide.fs.remove(path)`
-
-Permanently deletes a file or a directory structure from the local disk.
-
-```javascript
-await fluxide.fs.remove('data/config.json');
-```
-
-### `fluxide.fs.exists(path)`
-
-Checks for the physical presence of a file or folder. Returns a boolean.
-
-```javascript
-const hasData = await fluxide.fs.exists('data/config.json');
-```
-
-### `fluxide.fs.scanWorkspace()`
-
-Recursively maps the entire mounted physical directory into a flat object dictionary. The keys are the relative paths, and the values are the file contents. It inherently ignores `.git` and `node_modules` directories to preserve memory.
-
-```javascript
-const map = await fluxide.fs.scanWorkspace();
-```
+### `await fluxide.fs.scanWorkspace()`
+Rescans the entire mounted directory from the disk and returns an object mapping paths to their contents. Use this to refresh the VFS state.

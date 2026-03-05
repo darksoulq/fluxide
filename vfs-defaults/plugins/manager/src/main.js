@@ -1,5 +1,5 @@
 const { h } = fluxide.ui;
-const { state, on, expose, fs, theme } = fluxide;
+const { state, on, fs } = fluxide;
 
 fluxide.register({
     id: 'manager',
@@ -37,8 +37,10 @@ fluxide.register({
                     for (const a of actionsToProcess) {
                         if (a.type === 'install') {
                             totalSteps += Object.keys(a.files || {}).length;
-                        } else {
+                        } else if (a.type !== 'delete_plugin_safe') {
                             totalSteps += Object.keys(state.get().vfs).filter(p => p.startsWith(a.path + '/')).length + 1;
+                        } else {
+                            totalSteps += 1;
                         }
                     }
                     let currentStep = 0;
@@ -54,6 +56,12 @@ fluxide.register({
                                 currentStep++;
                                 pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                             }
+                        } else if (action.type === 'delete_plugin_safe') {
+                            pText.innerText = `Removing ${action.name || action.itemId}...`;
+                            const ok = await fluxide.plugins.uninstall(action.itemId);
+                            if (ok === false) pText.innerText = `Uninstall of ${action.name || action.itemId} aborted.`;
+                            currentStep++;
+                            pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                         } else if (action.type === 'delete') {
                             pText.innerText = `Removing ${action.name || action.itemId}...`;
                             const pathsToDel = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
@@ -68,19 +76,24 @@ fluxide.register({
                             pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                         } else if (action.type === 'disable' || action.type === 'enable') {
                             pText.innerText = `${action.type === 'disable' ? 'Disabling' : 'Enabling'} ${action.name || action.itemId}...`;
-                            const targetBase = action.type === 'disable' ? 'disabled' : (action.itemType === 'plugin' ? 'plugins' : (action.itemType === 'theme' ? 'themes' : 'icon-packs'));
-                            const targetPath = `${targetBase}/${action.itemId}`;
-                            const pathsToMove = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
-                            for (const p of pathsToMove) {
-                                const newPath = p.replace(action.path, targetPath);
-                                state.get().vfs[newPath] = state.get().vfs[p];
-                                await fs.write(newPath, state.get().vfs[p]);
-                                delete state.get().vfs[p];
-                                await fs.remove(p);
-                                currentStep++;
-                                pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
+                            if (action.itemType === 'plugin') {
+                                if (action.type === 'disable') await fluxide.plugins.disable(action.itemId);
+                                else await fluxide.plugins.enable(action.itemId);
+                            } else {
+                                const targetBase = action.type === 'disable' ? 'disabled' : (action.itemType === 'theme' ? 'themes' : 'icon-packs');
+                                const targetPath = `${targetBase}/${action.itemId}`;
+                                const pathsToMove = Object.keys(state.get().vfs).filter(p => p.startsWith(action.path + '/'));
+                                for (const p of pathsToMove) {
+                                    const newPath = p.replace(action.path, targetPath);
+                                    state.get().vfs[newPath] = state.get().vfs[p];
+                                    await fs.write(newPath, state.get().vfs[p]);
+                                    delete state.get().vfs[p];
+                                    await fs.remove(p);
+                                    currentStep++;
+                                    pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
+                                }
+                                await fs.remove(action.path);
                             }
-                            await fs.remove(action.path);
                             currentStep++;
                             pBar.style.width = ((currentStep / Math.max(1, totalSteps)) * 100) + '%';
                         }
@@ -88,7 +101,7 @@ fluxide.register({
                     
                     pText.innerText = 'Reloading IDE...';
                     pBar.style.width = '100%';
-                    setTimeout(() => location.reload(), 500);
+                    setTimeout(() => fluxide.forceReload(), 500);
                 })();
             });
         });
@@ -131,7 +144,7 @@ fluxide.register({
                     const data = viewingItem;
                     const vfsPaths = Object.keys(state.get().vfs);
                     const isInstalled = vfsPaths.some(p => p.startsWith(`plugins/${data.item_id}/`) || p.startsWith(`themes/${data.item_id}/`) || p.startsWith(`icon-packs/${data.item_id}/`));
-                    const isDisabled = vfsPaths.some(p => p.startsWith(`disabled/${data.item_id}/`));
+                    const isDisabled = vfsPaths.some(p => p.startsWith(`disabled/${data.item_id}/`)) || (state.get().settings.disabled_plugins || []).includes(data.item_id);
                     
                     const queuedInstall = pendingActions.find(a => a.type === 'install' && a.itemId === data.item_id);
 
@@ -290,6 +303,7 @@ fluxide.register({
                 } else if (activeTab === 'installed') {
                     const vfs = state.get().vfs;
                     const extensions = [];
+                    const dp = state.get().settings.disabled_plugins || [];
 
                     Object.keys(vfs).forEach(p => {
                         const isDis = p.startsWith('disabled/');
@@ -297,7 +311,8 @@ fluxide.register({
                             try {
                                 const data = JSON.parse(vfs[p]);
                                 const dir = p.substring(0, p.lastIndexOf('/'));
-                                extensions.push({ type: 'plugin', path: dir, id: data.id || dir.split('/')[1], name: data.name || data.id, version: data.version || '1.0.0', author: data.author || 'Unknown', disabled: isDis });
+                                const id = data.id || dir.split('/')[1];
+                                extensions.push({ type: 'plugin', path: dir, id: id, name: data.name || id, version: data.version || '1.0.0', author: data.author || 'Unknown', disabled: dp.includes(id) });
                             } catch(e) {}
                         }
                         if ((p.startsWith('themes/') || isDis) && p.endsWith('/theme.json')) {
@@ -322,15 +337,16 @@ fluxide.register({
                             const file = e.target.files[0];
                             if(!file) return;
                             if (file.name.endsWith('.zip')) {
-                                const pBarContainer = h('div', { style: { width: '100%', height: '4px', background: 'var(--surface-high)', borderRadius: '2px', overflow: 'hidden', margin: '20px 0 10px 0' } });
+                                const pText = h('div', { style: { fontSize: '12px', color: 'var(--text-dim)', marginBottom: '8px' } }, 'Extracting contents...');
+                                const pBarContainer = h('div', { style: { width: '100%', height: '4px', background: 'var(--surface-high)', borderRadius: '2px', overflow: 'hidden', margin: '10px 0' } });
                                 const pBar = h('div', { style: { width: '0%', height: '100%', background: 'var(--accent)', transition: 'width 0.1s linear' } });
                                 pBarContainer.appendChild(pBar);
 
                                 fluxide.ui.modal(win => {
                                     win.appendChild(h('div', { class: 'fx-modal-body', style: { textAlign: 'center', padding: '40px', color: 'var(--text)' } }, [
                                         h('h3', { style: { marginTop: 0, marginBottom: '10px' } }, 'Preparing Package...'),
-                                        pBarContainer,
-                                        h('div', { style: { fontSize: '12px', color: 'var(--text-dim)' } }, 'Extracting contents to memory.')
+                                        pText,
+                                        pBarContainer
                                     ]));
                                 });
 
@@ -365,6 +381,7 @@ fluxide.register({
                                             }
                                             i++;
                                             pBar.style.width = ((i / files.length) * 100) + '%';
+                                            pText.innerText = `Parsing file ${i} of ${files.length}`;
                                         }
                                         
                                         pendingActions.push({ type: 'install', name: metaData.name || itemId, itemType: typeFolder, itemId: itemId, files: preparedFiles });
@@ -386,7 +403,7 @@ fluxide.register({
                     ]));
 
                     extensions.sort((a,b) => a.type.localeCompare(b.type)).forEach(ext => {
-                        const isQueuedDel = pendingActions.some(a => a.type === 'delete' && a.path === ext.path);
+                        const isQueuedDel = pendingActions.some(a => (a.type === 'delete' || a.type === 'delete_plugin_safe') && a.path === ext.path);
                         const isQueuedToggle = pendingActions.some(a => (a.type === 'disable' || a.type === 'enable') && a.path === ext.path);
                         
                         const willBeDisabled = (ext.disabled && !isQueuedToggle) || (!ext.disabled && pendingActions.some(a => a.type === 'disable' && a.path === ext.path));
@@ -426,7 +443,7 @@ fluxide.register({
                                 }}, 'Export'),
                                 h('button', { class: 'fx-btn', disabled: isQueuedDel, style: { padding: '6px 12px', color: isQueuedDel ? 'var(--text-dim)' : 'var(--danger)', borderColor: isQueuedDel ? 'var(--border)' : 'var(--danger-border)' }, onClick: () => {
                                     if (ext.id === 'manager' || ext.id === 'ide') return;
-                                    pendingActions.push({ type: 'delete', path: ext.path, name: ext.name });
+                                    pendingActions.push({ type: ext.type === 'plugin' ? 'delete_plugin_safe' : 'delete', itemType: ext.type, itemId: ext.id, path: ext.path, name: ext.name });
                                     renderUI();
                                 }}, isQueuedDel ? 'Queued' : 'Uninstall')
                             ])

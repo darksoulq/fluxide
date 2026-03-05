@@ -1,7 +1,15 @@
+window._fx_is_writing = false;
+window._fx_reload_queued = false;
+const _origReload = window.location.reload;
+window.location.reload = function(...args) {
+    if (window._fx_write_locks > 0) return;
+    _origReload.apply(window.location, args);
+};
+
 const fluxide = (() => {
 	const r = { plugins: new Map(), views: new Map(), hooks: {}, components: new Map(), settings: [], keybinds: [], loadedPlugins: new Map() };
 	const m = {};
-	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', icon_pack: 'default', ui_scale: '1.0', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true', spark_enabled: 'false' }, workspace: null, startupErrors: [] };
+	const s = { activeView: 'ide', vfs: {}, settings: { theme: 'dracula', icon_pack: 'default', ui_scale: '1.0', dev_mode: 'false', word_wrap: 'false', code_folding: 'true', active_line: 'true', line_numbers: 'true', tab_size: '4', use_tabs: 'true', match_brackets: 'true', auto_close_brackets: 'true', spark_enabled: 'false', disabled_plugins: [] }, workspace: null, startupErrors: [] };
 
 	const resolvePath = (baseDir, target) => {
 		if (!target.startsWith('.')) return target;
@@ -41,7 +49,11 @@ const fluxide = (() => {
 	const api = {
 		state: { get: () => s, update: (fn) => fn(s) },
 		fs: FSManager,
+        lockReload: () => { window._fx_write_locks++; },
+        unlockReload: () => { setTimeout(() => { window._fx_write_locks = Math.max(0, window._fx_write_locks - 1); }, 1500); },
+        forceReload: () => { window._fx_write_locks = 0; _origReload.apply(window.location); },
 		on: (e, cb) => { if(!r.hooks[e]) r.hooks[e] = []; r.hooks[e].push(cb); },
+		off: (e, cb) => { if(r.hooks[e]) r.hooks[e] = r.hooks[e].filter(f => f !== cb); },
 		emit: (e, d) => { if(r.hooks[e]) r.hooks[e].forEach(cb => cb(d)); },
 		emitAsync: async (e, d) => { if(r.hooks[e]) { for (const cb of r.hooks[e]) await cb(d); } },
 		expose: (id, obj) => { api[id] = obj; },
@@ -55,12 +67,70 @@ const fluxide = (() => {
             const banner = document.createElement('div');
             banner.id = 'fx-reload-banner';
             banner.style.cssText = 'position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--surface-high); border: 1px solid var(--border); padding: 12px 24px; border-radius: var(--radius-md); z-index: 9999; display: flex; align-items: center; gap: 16px; box-shadow: var(--shadow); font-family: var(--font);';
-            banner.innerHTML = `<span style="color: var(--text); font-size: 13px; font-weight: 600;">${msg}</span><button class="fx-btn fx-btn-primary" onclick="location.reload()">Reload Now</button>`;
+            banner.innerHTML = `<span style="color: var(--text); font-size: 13px; font-weight: 600;">${msg}</span><button class="fx-btn fx-btn-primary" onclick="window.fluxide.forceReload()">Reload Now</button>`;
             document.body.appendChild(banner);
         },
 		plugins: {
 			has: (id) => r.loadedPlugins.has(id),
-			get: (id) => r.loadedPlugins.get(id)
+			get: (id) => r.loadedPlugins.get(id),
+			enable: async (id) => {
+				let dp = s.settings.disabled_plugins || [];
+				dp = dp.filter(x => x !== id);
+				api.state.update(st => st.settings.disabled_plugins = dp);
+				await FSManager.write('.fluxide/settings.json', JSON.stringify(s.settings, null, '\t'));
+			},
+			disable: async (id) => {
+				let dp = s.settings.disabled_plugins || [];
+				if (!dp.includes(id)) dp.push(id);
+				api.state.update(st => st.settings.disabled_plugins = dp);
+				await FSManager.write('.fluxide/settings.json', JSON.stringify(s.settings, null, '\t'));
+				const p = r.plugins.get(id);
+				if (p && p.onDisable) await p.onDisable(api);
+			},
+			uninstall: async (id) => {
+				const p = r.plugins.get(id);
+				if (p && p.onUninstall) {
+					const proceed = await p.onUninstall(api);
+					if (proceed === false) return false;
+				}
+				if (p && p.unmount) p.unmount(api);
+				const prefix = `plugins/${id}/`;
+				for (const path of Object.keys(s.vfs)) {
+					if (path.startsWith(prefix)) {
+						delete s.vfs[path];
+						await FSManager.remove(path);
+					}
+				}
+				r.plugins.delete(id);
+				r.loadedPlugins.delete(id);
+				if (p && p.view) {
+					r.views.delete(p.view.id);
+					if (s.activeView === p.view.id) api.ui.openView('ide');
+					else api.ui.openView(s.activeView);
+				}
+				return true;
+			},
+			reload: async (id) => {
+				const p = r.plugins.get(id);
+				if (p && p.unmount) p.unmount(api);
+				if (p && p.view) r.views.delete(p.view.id);
+				r.plugins.delete(id);
+				const prefix = `plugins/${id}/`;
+				Object.keys(m).forEach(k => { if(k.startsWith(prefix)) delete m[k]; });
+				const metaContent = s.vfs[`plugins/${id}/plugin.json`];
+				if (!metaContent) return false;
+				try {
+					const meta = JSON.parse(metaContent);
+					if(meta.entry) {
+						bootloader.require(meta.entry, `plugins/${id}`);
+						r.loadedPlugins.set(id, meta);
+						if (s.activeView === (p && p.view && p.view.id)) api.ui.openView(s.activeView);
+						else api.ui.openView(s.activeView);
+						return true;
+					}
+				} catch(e) { return false; }
+				return false;
+			}
 		},
 		keybinds: {
 			register: (id, key, action, description) => {
@@ -71,7 +141,19 @@ const fluxide = (() => {
 			getAll: () => r.keybinds
 		},
 		ui: {
-			h,
+			h: window.h || ((tag, props = {}, children = []) => {
+                const el = document.createElement(tag);
+                for (let k in props) {
+                    if (k === 'style' && typeof props[k] === 'object') Object.assign(el.style, props[k]);
+                    else if (k.startsWith('on') && typeof props[k] === 'function') el.addEventListener(k.substring(2).toLowerCase(), props[k]);
+                    else if (k === 'class') el.className = props[k];
+                    else el[k] = props[k];
+                }
+                if (props.innerHTML) el.innerHTML = props.innerHTML;
+                else if (Array.isArray(children)) children.forEach(c => { if(c) el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+                else if (children) el.appendChild(typeof children === 'string' ? document.createTextNode(children) : children);
+                return el;
+            }),
 			markdown: (t) => {
 				if(!window.marked) return t;
 				window.marked.setOptions({
@@ -92,7 +174,7 @@ const fluxide = (() => {
 				
 				const nav = document.getElementById('fx-nav'); nav.innerHTML = '';
 				const sortedViews = Array.from(r.views.values()).filter(p => p.view.nav).sort((a,b) => (a.view.order || 0) - (b.view.order || 0));
-				sortedViews.forEach(p => nav.appendChild(h('button', { class: 'fx-btn' + (s.activeView === p.view.id ? ' fx-btn-primary' : ''), style: { letterSpacing: '0.5px' }, onClick: () => api.ui.openView(p.view.id) }, p.view.label.toUpperCase())));
+				sortedViews.forEach(p => nav.appendChild(api.ui.h('button', { class: 'fx-btn' + (s.activeView === p.view.id ? ' fx-btn-primary' : ''), style: { letterSpacing: '0.5px' }, onClick: () => api.ui.openView(p.view.id) }, p.view.label.toUpperCase())));
 			},
 			context: (e, items) => {
 				e.preventDefault(); e.stopPropagation();
@@ -101,11 +183,11 @@ const fluxide = (() => {
 				
 				menu.innerHTML = '';
 				items.forEach(i => {
-					if (i.sep) { menu.appendChild(h('div', {class: 'ctx-sep'})); return; }
-					const leftWrap = h('div', { class: 'ctx-item-left' }, [ h('div', { class: 'ctx-item-icon', innerHTML: i.icon || '' }), h('span', {}, i.label) ]);
+					if (i.sep) { menu.appendChild(api.ui.h('div', {class: 'ctx-sep'})); return; }
+					const leftWrap = api.ui.h('div', { class: 'ctx-item-left' }, [ api.ui.h('div', { class: 'ctx-item-icon', innerHTML: i.icon || '' }), api.ui.h('span', {}, i.label) ]);
 					const itemHtml = [ leftWrap ];
-					if (i.key) itemHtml.push(h('span', {class: 'ctx-keybind'}, i.key));
-					menu.appendChild(h('div', { class: 'ctx-item' + (i.danger ? ' danger' : ''), onClick: () => { if(i.action) i.action(); overlay.click(); } }, itemHtml));
+					if (i.key) itemHtml.push(api.ui.h('span', {class: 'ctx-keybind'}, i.key));
+					menu.appendChild(api.ui.h('div', { class: 'ctx-item' + (i.danger ? ' danger' : ''), onClick: () => { if(i.action) i.action(); overlay.click(); } }, itemHtml));
 				});
 				
 				menu.style.display = 'block'; overlay.style.display = 'block';
@@ -121,12 +203,12 @@ const fluxide = (() => {
 			prompt: (title, placeholder = "") => {
 				return new Promise(resolve => {
 					api.ui.modal((win) => {
-						win.appendChild(h('div', { class: 'fx-modal-body' }, [
-							h('div', { style: { fontSize: '12px', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '15px', letterSpacing: '1px' } }, title.toUpperCase()),
-							h('input', { id: 'prompt-in', class: 'fx-input', placeholder: placeholder, onKeyDown: (e) => { if(e.key === 'Enter') document.getElementById('p-ok').click(); } }),
-							h('div', { style: { marginTop: '25px', display: 'flex', justifyContent: 'flex-end', gap: '10px' } }, [
-								h('button', { id: 'p-cancel', class: 'fx-btn', onClick: () => { resolve(null); api.ui.modal.close(); } }, 'Cancel'),
-								h('button', { id: 'p-ok', class: 'fx-btn fx-btn-primary', onClick: () => { resolve(document.getElementById('prompt-in').value); api.ui.modal.close(); } }, 'Confirm')
+						win.appendChild(api.ui.h('div', { class: 'fx-modal-body' }, [
+							api.ui.h('div', { style: { fontSize: '12px', fontWeight: 800, color: 'var(--text-dim)', marginBottom: '15px', letterSpacing: '1px' } }, title.toUpperCase()),
+							api.ui.h('input', { id: 'prompt-in', class: 'fx-input', placeholder: placeholder, onKeyDown: (e) => { if(e.key === 'Enter') document.getElementById('p-ok').click(); } }),
+							api.ui.h('div', { style: { marginTop: '25px', display: 'flex', justifyContent: 'flex-end', gap: '10px' } }, [
+								api.ui.h('button', { id: 'p-cancel', class: 'fx-btn', onClick: () => { resolve(null); api.ui.modal.close(); } }, 'Cancel'),
+								api.ui.h('button', { id: 'p-ok', class: 'fx-btn fx-btn-primary', onClick: () => { resolve(document.getElementById('prompt-in').value); api.ui.modal.close(); } }, 'Confirm')
 							])
 						]));
 						setTimeout(() => document.getElementById('prompt-in').focus(), 50);
@@ -181,6 +263,7 @@ const fluxide = (() => {
                     const handle = await IDB.get('workspace_handle');
                     if ((await handle.requestPermission({ mode: 'readwrite' })) === 'granted') {
                         FSManager.dirHandle = handle;
+                        FSManager.dirCache.clear();
                         overlay.style.opacity = '0';
                         setTimeout(() => { overlay.remove(); this.startServices(); }, 300);
                     }
@@ -198,9 +281,8 @@ const fluxide = (() => {
 		async startServices() {
 			const loadScreen = document.getElementById('fx-loading-screen');
 			const isInit = await FSManager.exists('.fluxide/init.json');
-			const hasIcons = await FSManager.exists('icon-packs/default/main.json');
 			
-			if (!isInit || !hasIcons) {
+			if (!isInit) {
 				loadScreen.style.display = 'flex';
 				const text = document.getElementById('fx-loading-text');
 				const bar = document.getElementById('fx-loading-bar');
@@ -243,25 +325,33 @@ const fluxide = (() => {
 					'sys/spark.js',
 					'sys/docs/index.json',
 					'sys/docs/kernel/state_events.md',
-					'sys/docs/kernel/fs.md',
-					'sys/docs/kernel/ui.md',
 					'sys/docs/kernel/registry.md',
-					'sys/docs/sys/theme.md',
-					'sys/docs/sys/ide.md',
+					'sys/docs/kernel/fs.md',
+					'sys/docs/ui/ui.md',
+					'sys/docs/ui/theme.md',
+					'sys/docs/ui/settings.md',
+					'sys/docs/ui/keybinds.md',
+					'sys/docs/ide/ide.md',
 					'plugins/workspace_zip/plugin.json',
 					'plugins/workspace_zip/src/main.js',
 					'plugins/manager/plugin.json',
 					'plugins/manager/src/main.js'
 				];
 
+                const fetchedData = {};
+                const totalSteps = defaultFilesToFetch.length * 2;
+                let stepCount = 0;
+
 				try {
 					for(let i=0; i < defaultFilesToFetch.length; i++) {
 						const path = defaultFilesToFetch[i];
+						if (await FSManager.exists(path)) { stepCount += 2; continue; }
 						text.innerText = 'Downloading: ' + path;
-						bar.style.width = ((i / defaultFilesToFetch.length) * 100) + '%';
-						const res = await fetch('./vfs-defaults/' + path);
+						bar.style.width = ((stepCount / totalSteps) * 100) + '%';
+						const res = await fetch('./vfs-defaults/' + path + '?t=' + Date.now());
 						if (!res.ok) throw new Error(res.status);
-						await FSManager.write(path, await res.text());
+                        fetchedData[path] = await res.text();
+                        stepCount++;
 					}
 				} catch(err) {
 					text.innerText = "Error: You MUST run this via a Local Web Server to fetch files.";
@@ -269,23 +359,26 @@ const fluxide = (() => {
 					return;
 				}
 
-				text.innerText = 'Provisioning State...';
-				const initWorkspace = {
-					columns: [
-						{ id: 'c1', title: 'BACKLOG', tasks: [] },
-						{ id: 'c2', title: 'IN PROGRESS', tasks: [] },
-						{ id: 'c3', title: 'DONE', tasks: [] }
-					]
-				};
-				await FSManager.write('.fluxide/workspace.json', JSON.stringify(initWorkspace, null, '\t'));
-				await FSManager.write('.fluxide/settings.json', JSON.stringify(s.settings, null, '\t'));
-				await FSManager.write('.fluxide/init.json', JSON.stringify({initialized: true, timestamp: Date.now()}, null, '\t'));
+				text.innerText = 'Writing files to workspace...';
 
-				bar.style.width = '100%';
-				text.innerText = 'Complete.';
+                const initWorkspace = { columns: [ { id: 'c1', title: 'BACKLOG', tasks: [] }, { id: 'c2', title: 'IN PROGRESS', tasks: [] }, { id: 'c3', title: 'DONE', tasks: [] } ] };
+                fetchedData['.fluxide/workspace.json'] = JSON.stringify(initWorkspace, null, '\t');
+                fetchedData['.fluxide/settings.json'] = JSON.stringify(s.settings, null, '\t');
+                fetchedData['.fluxide/init.json'] = JSON.stringify({initialized: true, timestamp: Date.now()}, null, '\t');
+
+                const entries = Object.entries(fetchedData);
+                for (let i = 0; i < entries.length; i++) {
+                    const [p, c] = entries[i];
+                    await FSManager.write(p, c);
+                    stepCount++;
+                    bar.style.width = ((stepCount / totalSteps) * 100) + '%';
+                }
+
+                bar.style.width = '100%';
+				text.innerText = 'Complete. Reloading system...';
 				await new Promise(r => setTimeout(r, 400));
-				loadScreen.style.opacity = '0';
-				setTimeout(() => loadScreen.style.display = 'none', 300);
+                api.forceReload();
+                return;
 			}
 
 			s.vfs = await FSManager.scanWorkspace();
@@ -319,10 +412,13 @@ const fluxide = (() => {
             });
 			
 			const queue = [];
+            const dp = s.settings.disabled_plugins || [];
 			Object.keys(s.vfs).forEach(path => {
 				if (path.startsWith('plugins/') && path.endsWith('/plugin.json')) {
                     const parts = path.split('/');
                     if(parts.length !== 3) return;
+                    const pid = parts[1];
+                    if(dp.includes(pid)) return;
 					try {
                         const meta = JSON.parse(s.vfs[path]);
                         if(!meta.name || !meta.version || !meta.entry || !meta.entry.startsWith('./')) return;

@@ -1,21 +1,28 @@
 {
-	"name": "Kernel & System",
-	"sections": [
-		{
-			"title": "Kernel API",
-			"pages": [
-				{ "file": "kernel/state_events.md", "title": "State & Events" },
-				{ "file": "kernel/fs.md", "title": "File System (VFS)" },
-				{ "file": "kernel/ui.md", "title": "UI & Modals" },
-				{ "file": "kernel/registry.md", "title": "Plugin Registry" }
-			]
-		},
-		{
-			"title": "System Plugins",
-			"pages": [
-				{ "file": "sys/theme.md", "title": "Theme Engine" },
-				{ "file": "sys/ide.md", "title": "IDE & Editor" }
-			]
-		}
-	]
+    "name": "System API",
+    "sections": [
+        {
+            "title": "Kernel & Core",
+            "pages": [
+                { "title": "State & Events", "file": "kernel/state_events.md" },
+                { "title": "Registry & Plugins", "file": "kernel/registry.md" },
+                { "title": "File System (VFS)", "file": "kernel/fs.md" }
+            ]
+        },
+        {
+            "title": "User Interface",
+            "pages": [
+                { "title": "UI & Modals", "file": "ui/ui.md" },
+                { "title": "Settings", "file": "ui/settings.md" },
+                { "title": "Keybinds", "file": "ui/keybinds.md" },
+                { "title": "Theming", "file": "ui/theme.md" }
+            ]
+        },
+        {
+            "title": "IDE & Editor",
+            "pages": [
+                { "title": "IDE Controls", "file": "ide/ide.md" }
+            ]
+        }
+    ]
 }
