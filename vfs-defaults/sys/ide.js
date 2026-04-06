@@ -81,7 +81,7 @@ const IDE = {
             container.appendChild(fluxide.settings.createControl('Active Line Highlight', 'toggle', 'active_line'));
             container.appendChild(fluxide.settings.createControl('Line Numbers', 'toggle', 'line_numbers'));
             container.appendChild(fluxide.settings.createControl('Use Tabs', 'toggle', 'use_tabs'));
-            container.appendChild(fluxide.settings.createControl('Match Brackets', 'toggle', 'auto_close_brackets'));
+            container.appendChild(fluxide.settings.createControl('Match Brackets', 'toggle', 'match_brackets'));
             container.appendChild(fluxide.settings.createControl('Auto Close Brackets', 'toggle', 'auto_close_brackets'));
         });
 
@@ -505,42 +505,33 @@ const IDE = {
 
         container.appendChild(sidebar); container.appendChild(editorArea);
 
-        this.cm = CodeMirror(this.editorContainer, {
-            mode: "javascript", theme: "dracula",
-            lineNumbers: true, autoCloseBrackets: true, matchBrackets: true,
-            indentUnit: 4, tabSize: 4, indentWithTabs: true, readOnly: 'nocursor',
-            foldGutter: true, gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"]
-        });
+        // ALWAYS initialize CM if it doesn't exist yet, but attach it to the DOM container
+        if (!this.cm) {
+            this.cm = CodeMirror(this.editorContainer, {
+                mode: "javascript", theme: "dracula",
+                lineNumbers: true, autoCloseBrackets: true, matchBrackets: true,
+                indentUnit: 4, tabSize: 4, indentWithTabs: true, readOnly: 'nocursor',
+                foldGutter: true, gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"]
+            });
 
-        this.updateEditorSettings();
+            this.updateEditorSettings();
 
-        this.cm.on('change', (cm, change) => {
-            if(this.activeTab && change.origin !== 'setValue') {
-                state.update(s => s.vfs[this.activeTab] = cm.getValue());
-                this.dirtyFiles.add(this.activeTab);
-                this.renderTabs();
-                emit('ide:file_changed', { path: this.activeTab, content: cm.getValue() });
-            }
-            this.updateStatusBar();
-            if(this.searchPanelEl && this.searchPanelEl.style.display !== 'none') this.runSearch();
-        });
+            this.cm.on('change', (cm, change) => {
+                if(this.activeTab && change.origin !== 'setValue') {
+                    state.update(s => s.vfs[this.activeTab] = cm.getValue());
+                    this.dirtyFiles.add(this.activeTab);
+                    this.renderTabs();
+                    emit('ide:file_changed', { path: this.activeTab, content: cm.getValue() });
+                }
+                this.updateStatusBar();
+                if(this.searchPanelEl && this.searchPanelEl.style.display !== 'none') this.runSearch();
+            });
 
-        this.cm.on('cursorActivity', () => this.updateStatusBar());
-        
-        on('ui:scale', () => { if(this.cm) this.cm.refresh(); });
-
-        this.editorContainer.oncontextmenu = (e) => {
-            const baseCtx = [
-                { label: 'Save File', key: 'Ctrl-S', icon: theme.getIcon('save'), action: async () => { if(this.activeTab) { await fluxide.fs.write(this.activeTab, this.cm.getValue()); this.dirtyFiles.delete(this.activeTab); this.renderTabs(); this.logToConsole(`Saved: ${this.activeTab}`, 'success'); emit('ide:file_saved', this.activeTab); } } },
-                { sep: true }, 
-                { label: 'Quick Open', key: 'Ctrl-P', icon: theme.getIcon('search'), action: () => this.openQuickSearch() },
-                { sep: true },
-                { label: 'Reload Kernel', action: () => location.reload() }
-            ];
-            const extCtx = fluxide.ide.editorContext.map(fn => fn(this.activeTab, this)).filter(Boolean);
-            if(extCtx.length) { baseCtx.push({ sep: true }); baseCtx.push(...extCtx.flat()); }
-            context(e, baseCtx);
-        };
+            this.cm.on('cursorActivity', () => this.updateStatusBar());
+        } else {
+            // If CM exists from a previous render, append its wrapper back into the container
+            this.editorContainer.appendChild(this.cm.getWrapperElement());
+        }
 
         this.renderFull();
         
@@ -577,17 +568,22 @@ const IDE = {
         
         if (this.activeTab && this.docCache.has(this.activeTab)) {
             const doc = this.docCache.get(this.activeTab);
-            if (this.cm.getDoc() !== doc) {
+            if (this.cm && this.cm.getDoc() !== doc) {
                 this.cm.swapDoc(doc);
             }
-            this.cm.setOption('readOnly', false);
+            if(this.cm) this.cm.setOption('readOnly', false);
             this.updateStatusBar();
         } else {
-            this.cm.setValue("");
-            this.cm.clearHistory();
-            this.cm.setOption('readOnly', 'nocursor');
+            if(this.cm) {
+                this.cm.setValue("");
+                this.cm.clearHistory();
+                this.cm.setOption('readOnly', 'nocursor');
+            }
             if(this.statusBar) this.statusBar.innerHTML = '';
         }
+        
+        // Ensure CM is fully sized and refreshed
+        setTimeout(() => { if(this.cm) this.cm.refresh(); }, 10);
     },
 
     renderTabs() {
